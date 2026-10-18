@@ -63,13 +63,28 @@ export function candidates(rowList) {
     .sort((a, b) => a.f2p + a.p2p - (b.f2p + b.p2p));
 }
 
-async function rows(dataset, config, split) {
+// datasets-server answers 429 when paged quickly; wait and retry rather than fail.
+async function getJson(url) {
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(url);
+    if (response.status === 429 && attempt < 6) {
+      await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
+      continue;
+    }
+    if (!response.ok) throw new Error(`${url} answered ${response.status}`);
+    return response.json();
+  }
+}
+
+// Every row, or with `where` only the rows that match (datasets-server's /filter), so a
+// large split can be narrowed to post-cutoff instances without paging through all of it.
+async function rows(dataset, config, split, where) {
+  const base = where
+    ? `https://datasets-server.huggingface.co/filter?where=${encodeURIComponent(where)}&`
+    : "https://datasets-server.huggingface.co/rows?";
   const all = [];
   for (let offset = 0; ; offset += 100) {
-    const url = `https://datasets-server.huggingface.co/rows?dataset=${encodeURIComponent(dataset)}&config=${encodeURIComponent(config)}&split=${encodeURIComponent(split)}&offset=${offset}&length=100`;
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`${url} answered ${response.status}`);
-    const page = await response.json();
+    const page = await getJson(`${base}dataset=${encodeURIComponent(dataset)}&config=${encodeURIComponent(config)}&split=${encodeURIComponent(split)}&offset=${offset}&length=100`);
     all.push(...page.rows.map((r) => r.row));
     if (page.rows.length < 100 || all.length >= page.num_rows_total) return all;
   }
@@ -82,10 +97,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       .reduce((pairs, v, i, a) => (i % 2 === 0 ? [...pairs, [v.replace(/^--/, ""), a[i + 1]]] : pairs), [])
   );
   if ("list" in args) {
-    const response = await fetch(`https://datasets-server.huggingface.co/splits?dataset=${encodeURIComponent(args.dataset)}`);
-    if (!response.ok) throw new Error(`splits answered ${response.status}`);
-    for (const { config, split } of (await response.json()).splits) {
-      const found = candidates(await rows(args.dataset, config, split));
+    const { splits } = await getJson(`https://datasets-server.huggingface.co/splits?dataset=${encodeURIComponent(args.dataset)}`);
+    for (const { config, split } of splits) {
+      let found;
+      try {
+        found = candidates(await rows(args.dataset, config, split, `"created_at" > '${CUTOFF.slice(0, 10)}'`));
+      } catch (err) {
+        console.log(`## ${config} / ${split}: could not be read (${err instanceof Error ? err.message : String(err)})`);
+        continue;
+      }
       console.log(`## ${config} / ${split}: ${found.length} after the cutoff`);
       for (const c of found.slice(0, 40)) console.log(`${c.id}\t${c.repo}\t${c.created_at}\tF2P ${c.f2p}\tP2P ${c.p2p}`);
     }
