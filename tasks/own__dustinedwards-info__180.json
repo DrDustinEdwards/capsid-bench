@@ -1,0 +1,23 @@
+{
+  "task_id": "own__dustinedwards-info__180",
+  "source": "own",
+  "split": "pilot",
+  "repo": "DrDustinEdwards/dustinedwards-info",
+  "issue_created_at": "2026-09-26T02:13:31Z",
+  "base_commit": "3ffaa5f4997effc5e704d443e13fb9dcef6a1862",
+  "image": "node:26.11.1-bookworm",
+  "problem_statement": "Dynamic-import checker reports a lazy import as defeated by an `import type`\n\n`findIneffectiveDynamicImports` (scripts/lib/dynamic-imports.mjs) flags a dynamic `import()` as ineffective when some other module in the graph imports the same module statically. It currently counts type-only statements as static imports.\n\nReal case: `use-link-palette.ts` reads a type from `markdown-editor` with `import type { ... } from \"./markdown-editor\"`, which TypeScript erases entirely, yet `post-editor.tsx`'s lazy `import()` of `markdown-editor` is reported as ineffective even though the chunk does split.\n\nReproduce:\n```js\nfindIneffectiveDynamicImports([\n  { path: \"app/a.ts\", source: 'import type { LinkTarget } from \"./editor\";\nexport type * from \"./editor\";' },\n  { path: \"app/b.tsx\", source: 'const E = lazy(() => import(\"./editor\"));' },\n]);\n```\nreturns one finding; it should return `[]`.\n\nExpected: a whole statement the build erases (`import type ... from`, `export type ... from`) defeats nothing. Do not over-correct, though:\n- a braced list in which every specifier is `type X` (e.g. `import { type A, type B } from \"./editor\"`) is NOT erased under this repo's `verbatimModuleSyntax` (it is kept as a side-effect import) and must still count;\n- a mixed list such as `import { type A, b }` still counts;\n- `import type from \"./editor\"` is a default import named `type` and still counts.",
+  "gold_patch": "diff --git a/scripts/lib/dynamic-imports.mjs b/scripts/lib/dynamic-imports.mjs\nindex 6aa2952b..59b163fa 100644\n--- a/scripts/lib/dynamic-imports.mjs\n+++ b/scripts/lib/dynamic-imports.mjs\n@@ -20,6 +20,20 @@ export function moduleKey(spec, from) {\n   return path.replace(/\\.(?:ts|tsx|mjs|js)$/, \"\").replace(/\\/index$/, \"\");\n }\n \n+/**\n+ * True when the build erases the whole statement: `import type { X }`, `export type * from`. A\n+ * braced list whose every specifier is `type X` is NOT erased: under this repo's\n+ * verbatimModuleSyntax the oxc transform Vite runs keeps it as the side-effect import\n+ * `import \"x\"` (measured 2026-09-25 with rolldown/utils transformSync), which still loads the\n+ * module statically. `import type from \"x\"` is a default import named `type`.\n+ *\n+ * @param {string} clause the text between `import`/`export` and `from`\n+ */\n+function isTypeOnlyClause(clause) {\n+  // Trimmed, so a bare `type` (the default import named type) has nothing after it and fails.\n+  return /^type(?:\\s+[\\w${*]|\\s*[{*])/.test(clause.trim());\n+}\n+\n /**\n  * A dynamic import splits nothing when some module in the same graph imports it statically.\n  * Files are `{ path, source }` with repo-relative paths.\n@@ -34,8 +48,13 @@ export function findIneffectiveDynamicImports(files) {\n \n   for (const { path, source } of files) {\n     const code = stripComments(source);\n-    for (const m of code.matchAll(/\\bfrom\\s*[\"']([^\"']+)[\"']/g)) {\n-      const key = moduleKey(m[1], path);\n+    // The clause is everything between the nearest `import`/`export` and `from`, so a statement\n+    // before it on an unterminated line cannot lend it a type-only reading or take one away.\n+    for (const m of code.matchAll(\n+      /\\b(?:import|export)\\s+((?:(?!\\b(?:import|export)\\b)[^;\"'`])*?)\\bfrom\\s*[\"']([^\"']+)[\"']/g,\n+    )) {\n+      if (isTypeOnlyClause(m[1])) continue;\n+      const key = moduleKey(m[2], path);\n       if (!key) continue;\n       if (!statics.has(key)) statics.set(key, []);\n       /** @type {string[]} */ (statics.get(key)).push(path);\n",
+  "fail_to_pass": [
+    "node --test --test-name-pattern=\"import type. statement is erased\" test/dynamic-imports.test.mjs"
+  ],
+  "pass_to_pass": [
+    "node --test --test-name-pattern=\"braced list where every specifier|mixed list with one value\" test/dynamic-imports.test.mjs",
+    "node --test --test-name-pattern=\"self-test fixture|named only in a comment\" test/dynamic-imports.test.mjs"
+  ],
+  "fix_commit": "85a7a8eb467e67a29c07749c98bd1b3ec4f0bfe0",
+  "hidden_files": [
+    "test/dynamic-imports.test.mjs"
+  ],
+  "setup": "npm ci --ignore-scripts"
+}

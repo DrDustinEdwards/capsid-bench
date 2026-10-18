@@ -1,0 +1,44 @@
+name: bench-register
+
+# Register every task file on main with Capsid (/bench/tasks). Own tasks are written by
+# hand and merged by pull request, so nothing else registers them. Registering an
+# unchanged task again is a no-op; Capsid refuses a changed one (409), which fails here.
+# Calls no model and starts no run.
+
+on:
+  push:
+    branches: [main]
+    paths: ["tasks/*.json"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency: bench-register
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CAPSID_URL: https://mcp.dustinedwards.info
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Register the tasks
+        env:
+          BENCH_KEY: ${{ secrets.BENCH_KEY }}
+        run: |
+          set -euo pipefail
+          for f in tasks/*.json; do
+            [ -e "$f" ] || continue
+            node scripts/task.mjs register "$f" "${RUNNER_TEMP}/register.json"
+            node scripts/sign-post.mjs /bench/tasks "${RUNNER_TEMP}/register.json"
+            echo
+          done
