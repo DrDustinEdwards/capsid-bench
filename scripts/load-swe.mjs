@@ -10,10 +10,15 @@
 // the model's cutoff is refused here rather than at run time. The image name is the
 // row's own when it carries one, else the SWE-bench harness's naming under the given
 // namespace; check-gold confirms it pulls before any model run.
+//
+//   node scripts/load-swe.mjs --list yes --dataset nebius/SWE-rebench-leaderboard
+//
+// lists the dataset's splits and, for each, the instances opened after the cutoff with
+// their test counts, so ids can be chosen without reaching Hugging Face from elsewhere.
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkTask } from "./task.mjs";
+import { checkTask, CUTOFF } from "./task.mjs";
 
 // SWE-bench stores the two test lists as JSON text; some exports store real arrays.
 export function testList(value) {
@@ -48,6 +53,16 @@ export function taskFromRow(row, { source, dataset, split, benchSplit, namespace
   };
 }
 
+// The instances worth considering: opened after the cutoff, with at least one
+// FAIL_TO_PASS test, fewest tests first (a short hidden suite is cheaper to score).
+export function candidates(rowList) {
+  return rowList
+    .filter((r) => typeof r.created_at === "string" && r.created_at > CUTOFF)
+    .map((r) => ({ id: r.instance_id, repo: r.repo, created_at: r.created_at, f2p: testList(r.FAIL_TO_PASS).length, p2p: testList(r.PASS_TO_PASS).length }))
+    .filter((c) => c.f2p > 0)
+    .sort((a, b) => a.f2p + a.p2p - (b.f2p + b.p2p));
+}
+
 async function rows(dataset, config, split) {
   const all = [];
   for (let offset = 0; ; offset += 100) {
@@ -66,6 +81,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       .slice(2)
       .reduce((pairs, v, i, a) => (i % 2 === 0 ? [...pairs, [v.replace(/^--/, ""), a[i + 1]]] : pairs), [])
   );
+  if ("list" in args) {
+    const response = await fetch(`https://datasets-server.huggingface.co/splits?dataset=${encodeURIComponent(args.dataset)}`);
+    if (!response.ok) throw new Error(`splits answered ${response.status}`);
+    for (const { config, split } of (await response.json()).splits) {
+      const found = candidates(await rows(args.dataset, config, split));
+      console.log(`## ${config} / ${split}: ${found.length} after the cutoff`);
+      for (const c of found.slice(0, 40)) console.log(`${c.id}\t${c.repo}\t${c.created_at}\tF2P ${c.f2p}\tP2P ${c.p2p}`);
+    }
+    process.exit(0);
+  }
   const ids = new Set((args.ids ?? "").split(/\s+/).filter(Boolean));
   if (!args.dataset || !args.split || !args["bench-split"] || ids.size === 0) {
     console.error("usage: node scripts/load-swe.mjs --dataset D --split S --bench-split pilot|full --ids \"id1 id2\" [--config default] [--source swe-rebench] [--namespace swerebench]");

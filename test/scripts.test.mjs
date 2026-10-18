@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 import { request } from "node:http";
 import { test } from "node:test";
 import { allowed, startProxy } from "../scripts/egress-proxy.mjs";
-import { imageFor, taskFromRow, testList } from "../scripts/load-swe.mjs";
+import { candidates, imageFor, taskFromRow, testList } from "../scripts/load-swe.mjs";
 import { parseClaim } from "../scripts/parse-claim.mjs";
 import { jobBody } from "../scripts/post-job.mjs";
 import { buildReport, modelFailure } from "../scripts/report.mjs";
@@ -146,4 +146,15 @@ test("the proxy tunnels only to an allowlisted host on 443", async () => {
   server.close();
   assert.equal(status, 403);
   assert.deepEqual(lines, ["DENY CONNECT huggingface.co:443"]);
+});
+
+test("the candidate list keeps only post-cutoff instances with a FAIL_TO_PASS test, smallest suite first", () => {
+  const row = (id, created_at, f2p, p2p) => ({ instance_id: id, repo: "sample/repo", created_at, FAIL_TO_PASS: JSON.stringify(f2p), PASS_TO_PASS: JSON.stringify(p2p) });
+  const found = candidates([
+    row("old", "2026-05-01T00:00:00Z", ["t"], []),
+    row("big", "2026-08-01T00:00:00Z", ["a", "b"], ["c", "d"]),
+    row("none", "2026-08-01T00:00:00Z", [], ["c"]),
+    row("small", "2026-09-01T00:00:00Z", ["a"], []),
+  ]);
+  assert.deepEqual(found.map((c) => c.id), ["small", "big"]);
 });

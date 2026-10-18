@@ -1,0 +1,33 @@
+name: bench-list
+
+# List a dataset's instances opened after the model's cutoff, with their test counts, so
+# pilot and full ids can be chosen. Reads Hugging Face only: registers nothing, starts no
+# run, calls no model.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: Hugging Face dataset
+        default: nebius/SWE-rebench-leaderboard
+
+permissions:
+  contents: read
+
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: List the candidates
+        env:
+          DATASET: ${{ inputs.dataset }}
+        run: node scripts/load-swe.mjs --list yes --dataset "${DATASET}" | tee -a "$GITHUB_STEP_SUMMARY"
