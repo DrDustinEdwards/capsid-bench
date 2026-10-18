@@ -153,6 +153,9 @@ jobs:
             -e HTTPS_PROXY=http://proxy:3128 -e HTTP_PROXY=http://proxy:3128 -e NO_PROXY=localhost,127.0.0.1 \
             -e IS_SANDBOX=1 -e DISABLE_AUTOUPDATER=1 -e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
             --entrypoint sleep "${IMAGE}" infinity
+          # An own task's /testbed is the runner's clone, owned by another uid than the
+          # container's root, so git refuses it ("dubious ownership") and the diff comes out empty.
+          docker exec task git config --system --add safe.directory /testbed
           # Only now is the machine known to be ready. Without this, a run whose image
           # never pulled would score as an empty diff instead of being unjudged.
           echo "ok=1" >> "$GITHUB_OUTPUT"
