@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Test the scripts
+        run: node --test test/
+
+      - name: Check every task file
+        run: |
+          set -euo pipefail
+          for f in tasks/*.json; do
+            [ -e "$f" ] || continue
+            node scripts/task.mjs check "$f"
+            # The file name is the task id, which is how a run finds it.
+            [ "$(node -p 'require(process.argv[1]).task_id' "$PWD/$f")" = "$(basename "$f" .json)" ] || { echo "$f: file name and task_id differ" >&2; exit 1; }
+          done

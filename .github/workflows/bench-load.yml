@@ -1,0 +1,76 @@
+name: bench-load
+
+# Load benchmark tasks into tasks/ and register them with Capsid (/bench/tasks), so the
+# list Capsid scores is the list in this repo. The task files land on a new branch
+# for a pull request; Capsid refuses a later change to a registered task, so a pull
+# request that edits one fails at its first run rather than silently re-scoring.
+# Calls no model and starts no run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: Hugging Face dataset, e.g. nebius/SWE-rebench-leaderboard
+        required: true
+      config:
+        description: Dataset config
+        default: default
+      split:
+        description: Dataset split (a window after 2026-06-30)
+        required: true
+      ids:
+        description: Instance ids, space separated
+        required: true
+      bench_split:
+        description: Which part of the study
+        required: true
+        type: choice
+        options: [pilot, full, excluded]
+
+permissions:
+  contents: write
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATASET: ${{ inputs.dataset }}
+      CONFIG: ${{ inputs.config }}
+      SPLIT: ${{ inputs.split }}
+      IDS: ${{ inputs.ids }}
+      BENCH_SPLIT: ${{ inputs.bench_split }}
+      CAPSID_URL: https://mcp.dustinedwards.info
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Write the task files
+        run: node scripts/load-swe.mjs --dataset "${DATASET}" --config "${CONFIG}" --split "${SPLIT}" --bench-split "${BENCH_SPLIT}" --ids "${IDS}"
+
+      - name: Register them with Capsid
+        env:
+          BENCH_KEY: ${{ secrets.BENCH_KEY }}
+        run: |
+          set -euo pipefail
+          set -f
+          for id in ${IDS}; do
+            node scripts/task.mjs register "tasks/${id}.json" "${RUNNER_TEMP}/register.json"
+            node scripts/sign-post.mjs /bench/tasks "${RUNNER_TEMP}/register.json"
+            echo
+          done
+
+      - name: Push the branch
+        run: |
+          set -euo pipefail
+          BRANCH="tasks/${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${BRANCH}"
+          git add tasks/
+          git commit -m "Tasks: ${BENCH_SPLIT} from ${DATASET} ${SPLIT}"
+          git push origin "${BRANCH}"
+          echo "Open a pull request from ${BRANCH}." >> "$GITHUB_STEP_SUMMARY"

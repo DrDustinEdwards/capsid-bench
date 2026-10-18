@@ -1,0 +1,339 @@
+name: bench-run
+
+# ONE TASK, ONE ARM, ONE RUN (capsid/research/design-paired-comparison.md, section 2).
+#
+#   agent  pulls the task's image, runs the arm inside it with egress limited to an
+#          allowlist proxy, and uploads the agent's diff and Claude Code's JSON results.
+#          The planted arms call no model: check-gold applies the upstream fix and
+#          check-false-claim plants a file that fixes nothing, both claiming done.
+#   score  on a fresh runner, scores the diff against the hidden tests and posts the
+#          counts to Capsid, which computes resolved and the false claim itself.
+#
+# NOTHING RUNS UNLESS CAPSID SAYS SO: /bench/start refuses while KV bench:enabled is not
+# "on", over 4 running runs, or (treatment) while the bench job breaker is open.
+#
+# SUBSCRIPTION, NOT A KEY. Claude Code authenticates with CLAUDE_CODE_OAUTH_TOKEN from
+# `claude setup-token`. A set ANTHROPIC_API_KEY would win and bill the Console account
+# (code.claude.com/docs/en/authentication), so the run refuses to start with one.
+#
+# UNTRUSTED INPUT. Workflow inputs reach shell only through env and are checked; agent
+# code runs only inside containers; the scoring job holds no secret while agent code
+# runs, and the bench key is read only by the step that posts.
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: The task, as named by its file in tasks/.
+        required: true
+      arm:
+        description: Which arm to run.
+        required: true
+        type: choice
+        options: [baseline, treatment, check-gold, check-false-claim]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-${{ inputs.task_id }}-${{ inputs.arm }}
+  cancel-in-progress: false
+
+env:
+  TASK_ID: ${{ inputs.task_id }}
+  ARM: ${{ inputs.arm }}
+  # Pinned at registration (design section 6). Both arms read the same values.
+  MODEL: claude-sonnet-5-5
+  CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
+  SWE_HARNESS_REF: ${{ vars.SWE_HARNESS_REF }}
+  CAPSID_URL: https://mcp.dustinedwards.info
+  # The proxy's image, the digest capsid's improve scorer pins.
+  NODE_IMAGE: node:26.11.1-bookworm@sha256:f1233c415b41ffcf237c717b3dea92e9d4ea006e0e4c71edcb790605d74f5404
+
+jobs:
+  agent:
+    name: agent (${{ inputs.arm }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    outputs:
+      run_id: ${{ steps.open.outputs.run_id }}
+      job_id: ${{ steps.job.outputs.job_id }}
+      image_bytes: ${{ steps.prepare.outputs.image_bytes }}
+      claim: ${{ steps.claim.outputs.claim }}
+      version: ${{ steps.claude.outputs.version }}
+      ready: ${{ steps.ready.outputs.ok }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Refuse a stray API key, a malformed task id or a missing pin
+        env:
+          STRAY_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${STRAY_KEY}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "ANTHROPIC_API_KEY is set. A run would bill the Console account instead of the subscription. Remove it." >&2
+            exit 1
+          fi
+          [[ "${TASK_ID}" =~ ^[A-Za-z0-9._-]{1,200}$ ]] || { echo "malformed task id" >&2; exit 1; }
+          [ -f "tasks/${TASK_ID}.json" ] || { echo "no tasks/${TASK_ID}.json" >&2; exit 1; }
+          if [ "${ARM}" = baseline ] || [ "${ARM}" = treatment ]; then
+            [ -n "${CLAUDE_CODE_VERSION}" ] || { echo "set the repo variable CLAUDE_CODE_VERSION (pinned at registration)" >&2; exit 1; }
+          fi
+
+      - name: Stage the task
+        id: task
+        run: node scripts/task.mjs stage "tasks/${TASK_ID}.json" "${RUNNER_TEMP}/stage"
+
+      - name: Open the run in Capsid
+        id: open
+        env:
+          BENCH_KEY: ${{ secrets.BENCH_KEY }}
+        run: |
+          set -euo pipefail
+          node -e 'process.stdout.write(JSON.stringify({ task_id: process.env.TASK_ID, arm: process.env.ARM, gh_run: `${process.env.GITHUB_RUN_ID}.${process.env.GITHUB_RUN_ATTEMPT}` }))' > "${RUNNER_TEMP}/start.json"
+          node scripts/sign-post.mjs /bench/start "${RUNNER_TEMP}/start.json" > "${RUNNER_TEMP}/started.json"
+          echo "run_id=$(node -p 'require(process.argv[1]).run_id' "${RUNNER_TEMP}/started.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare the task's container
+        id: prepare
+        env:
+          IMAGE: ${{ steps.task.outputs.image }}
+          SOURCE: ${{ steps.task.outputs.source }}
+          REPO: ${{ steps.task.outputs.repo }}
+          BASE: ${{ steps.task.outputs.base_commit }}
+        run: |
+          set -euo pipefail
+          docker pull --quiet "${IMAGE}"
+          echo "image_bytes=$(docker image inspect -f '{{.Size}}' "${IMAGE}")" >> "$GITHUB_OUTPUT"
+          MOUNTS=()
+          if [ "${SOURCE}" = own ]; then
+            # An own task's repo at its base commit, set up with network before any agent
+            # byte exists. Benchmark images carry their repo at /testbed already.
+            git clone --quiet "https://github.com/${REPO}.git" "${RUNNER_TEMP}/testbed"
+            git -C "${RUNNER_TEMP}/testbed" checkout --quiet "${BASE}"
+            docker run --rm -v "${RUNNER_TEMP}/testbed:/testbed" -v "${RUNNER_TEMP}/stage/private/setup.sh:/setup.sh:ro" -w /testbed "${IMAGE}" sh /setup.sh
+            MOUNTS+=(-v "${RUNNER_TEMP}/testbed:/testbed")
+          fi
+          docker network create --internal bench-internal
+          printf '%s\n' "${MOUNTS[@]+"${MOUNTS[@]}"}" > "${RUNNER_TEMP}/mounts.txt"
+
+      - name: Install Claude Code (pinned)
+        id: claude
+        if: inputs.arm == 'baseline' || inputs.arm == 'treatment'
+        run: |
+          set -euo pipefail
+          curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_CODE_VERSION}"
+          BIN=$(readlink -f "${HOME}/.local/bin/claude")
+          echo "bin=${BIN}" >> "$GITHUB_OUTPUT"
+          echo "version=$("${BIN}" --version | head -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Start the egress proxy and the task container
+        id: ready
+        env:
+          IMAGE: ${{ steps.task.outputs.image }}
+          CLAUDE_BIN: ${{ steps.claude.outputs.bin }}
+        run: |
+          set -euo pipefail
+          ALLOW=api.anthropic.com
+          [ "${ARM}" = treatment ] && ALLOW="${ALLOW},mcp.dustinedwards.info"
+          docker run -d --name proxy -e ALLOW="${ALLOW}" -v "${GITHUB_WORKSPACE}/scripts:/scripts:ro" "${NODE_IMAGE}" node /scripts/egress-proxy.mjs
+          docker network connect bench-internal proxy
+          mapfile -t MOUNTS < "${RUNNER_TEMP}/mounts.txt"
+          CLAUDE_MOUNT=()
+          [ -n "${CLAUDE_BIN}" ] && CLAUDE_MOUNT=(-v "${CLAUDE_BIN}:/usr/local/bin/claude:ro")
+          docker run -d --name task --network bench-internal \
+            "${MOUNTS[@]+"${MOUNTS[@]}"}" "${CLAUDE_MOUNT[@]+"${CLAUDE_MOUNT[@]}"}" \
+            -v "${RUNNER_TEMP}/stage/agent:/bench:ro" \
+            -e HTTPS_PROXY=http://proxy:3128 -e HTTP_PROXY=http://proxy:3128 -e NO_PROXY=localhost,127.0.0.1 \
+            -e IS_SANDBOX=1 -e DISABLE_AUTOUPDATER=1 -e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+            --entrypoint sleep "${IMAGE}" infinity
+          # Only now is the machine known to be ready. Without this, a run whose image
+          # never pulled would score as an empty diff instead of being unjudged.
+          echo "ok=1" >> "$GITHUB_OUTPUT"
+
+      - name: Post the treatment's Capsid job
+        id: job
+        if: inputs.arm == 'treatment'
+        env:
+          BENCH_DRIVER_KEY: ${{ secrets.BENCH_DRIVER_KEY }}
+          RUN_ID: ${{ steps.open.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          echo "job_id=$(node scripts/post-job.mjs "${RUN_ID}" "${TASK_ID}" "${RUNNER_TEMP}/stage/agent/problem.md")" >> "$GITHUB_OUTPUT"
+          printf '%s' '{"mcpServers":{"capsid":{"type":"http","url":"https://mcp.dustinedwards.info/ops/mcp","headers":{"Authorization":"Bearer ${BENCH_DRIVER_KEY}"}}}}' > "${RUNNER_TEMP}/mcp.json"
+          docker cp "${RUNNER_TEMP}/mcp.json" task:/tmp/mcp.json
+
+      - name: Run the planted arm (no model)
+        if: inputs.arm == 'check-gold' || inputs.arm == 'check-false-claim'
+        run: |
+          set -euo pipefail
+          if [ "${ARM}" = check-gold ]; then
+            docker exec -i task git -C /testbed apply --whitespace=nowarn - < "${RUNNER_TEMP}/stage/private/gold.patch"
+          else
+            docker exec task sh -c 'echo "planted by check-false-claim" > /testbed/BENCH_PLANTED.txt'
+          fi
+
+      - name: Run the baseline
+        if: inputs.arm == 'baseline'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set -uo pipefail
+          timeout 45m docker exec -e CLAUDE_CODE_OAUTH_TOKEN -w /testbed task \
+            claude -p "$(cat "${RUNNER_TEMP}/stage/agent/problem.md")" \
+              --append-system-prompt "$(cat prompts/baseline.md)" \
+              --model "${MODEL}" --max-turns 100 --output-format json --dangerously-skip-permissions \
+            > "${RUNNER_TEMP}/turn1.json" || echo "the baseline exited $?"
+
+      - name: Run the treatment's first turn
+        id: turn1
+        if: inputs.arm == 'treatment'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          BENCH_DRIVER_KEY: ${{ secrets.BENCH_DRIVER_KEY }}
+          JOB_ID: ${{ steps.job.outputs.job_id }}
+        run: |
+          set -uo pipefail
+          timeout 36m docker exec -e CLAUDE_CODE_OAUTH_TOKEN -e BENCH_DRIVER_KEY -w /testbed task \
+            claude -p "Your Capsid job is ${JOB_ID}." \
+              --append-system-prompt "$(cat prompts/treatment.md)" --mcp-config /tmp/mcp.json \
+              --model "${MODEL}" --max-turns 80 --output-format json --dangerously-skip-permissions \
+            > "${RUNNER_TEMP}/turn1.json" || echo "turn 1 exited $?"
+          echo "session=$(node -p 'try { require(process.argv[1]).session_id ?? "" } catch { "" }' "${RUNNER_TEMP}/turn1.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Take the diff
+        if: always() && steps.open.outputs.run_id != ''
+        env:
+          BASE: ${{ steps.task.outputs.base_commit }}
+        run: |
+          set -uo pipefail
+          docker exec task sh -c 'cd /testbed && git add -A && git diff --cached --binary "$0"' "${BASE}" > "${RUNNER_TEMP}/diff.patch" || true
+          wc -c "${RUNNER_TEMP}/diff.patch"
+
+      - name: Install the benchmark harness (treatment verifier)
+        if: inputs.arm == 'treatment' && steps.task.outputs.source != 'own'
+        run: |
+          set -euo pipefail
+          [[ "${SWE_HARNESS_REF}" =~ ^[0-9a-f]{40}$ ]] || { echo "set the repo variable SWE_HARNESS_REF to a commit sha" >&2; exit 1; }
+          python3 -m venv "${RUNNER_TEMP}/venv"
+          "${RUNNER_TEMP}/venv/bin/pip" install --quiet "git+https://github.com/SWE-rebench/SWE-bench-fork@${SWE_HARNESS_REF}"
+
+      - name: Verify and run the treatment's second turn
+        if: inputs.arm == 'treatment'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          BENCH_DRIVER_KEY: ${{ secrets.BENCH_DRIVER_KEY }}
+          SESSION: ${{ steps.turn1.outputs.session }}
+          BASE: ${{ steps.task.outputs.base_commit }}
+        run: |
+          set -uo pipefail
+          # The secrets are in this step's env only for the docker exec below; the
+          # scorer that runs agent code starts with them removed.
+          env -u CLAUDE_CODE_OAUTH_TOKEN -u BENCH_DRIVER_KEY PATH="${RUNNER_TEMP}/venv/bin:${PATH}" \
+            node scripts/score.mjs "tasks/${TASK_ID}.json" "${RUNNER_TEMP}/diff.patch" "${RUNNER_TEMP}/verify.json"
+          node scripts/verifier-message.mjs "${RUNNER_TEMP}/verify.json" > "${RUNNER_TEMP}/verifier.md"
+          if [ -z "${SESSION}" ]; then echo "turn 1 left no session to resume"; exit 0; fi
+          timeout 9m docker exec -e CLAUDE_CODE_OAUTH_TOKEN -e BENCH_DRIVER_KEY -w /testbed task \
+            claude -p "$(cat "${RUNNER_TEMP}/verifier.md")" --resume "${SESSION}" \
+              --append-system-prompt "$(cat prompts/treatment.md)" --mcp-config /tmp/mcp.json \
+              --model "${MODEL}" --max-turns 20 --output-format json --dangerously-skip-permissions \
+            > "${RUNNER_TEMP}/turn2.json" || echo "turn 2 exited $?"
+          docker exec task sh -c 'cd /testbed && git add -A && git diff --cached --binary "$0"' "${BASE}" > "${RUNNER_TEMP}/diff.patch" || true
+
+      - name: Read the claim
+        id: claim
+        if: always() && steps.open.outputs.run_id != ''
+        run: |
+          case "${ARM}" in
+            baseline) echo "claim=$(node scripts/parse-claim.mjs "${RUNNER_TEMP}/turn1.json")" >> "$GITHUB_OUTPUT" ;;
+            check-gold|check-false-claim) echo "claim=true" >> "$GITHUB_OUTPUT" ;;
+            # The treatment's claim is its job's status, read by Capsid.
+            *) echo "claim=" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Show the egress log
+        if: always()
+        run: docker logs proxy 2>&1 | tail -50 || true
+
+      - name: Upload the run
+        if: always() && steps.open.outputs.run_id != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: run
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/diff.patch
+            ${{ runner.temp }}/turn1.json
+            ${{ runner.temp }}/turn2.json
+            ${{ runner.temp }}/verify.json
+
+  score:
+    name: score
+    needs: agent
+    if: always() && needs.agent.outputs.run_id != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Download the run
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: run
+          path: ${{ runner.temp }}/run
+
+      - name: Install the benchmark harness
+        run: |
+          set -euo pipefail
+          SOURCE=$(node -p 'require(process.argv[1]).source' "tasks/${TASK_ID}.json")
+          if [ "${SOURCE}" != own ]; then
+            [[ "${SWE_HARNESS_REF}" =~ ^[0-9a-f]{40}$ ]] || { echo "set the repo variable SWE_HARNESS_REF to a commit sha" >&2; exit 1; }
+            python3 -m venv "${RUNNER_TEMP}/venv"
+            "${RUNNER_TEMP}/venv/bin/pip" install --quiet "git+https://github.com/SWE-rebench/SWE-bench-fork@${SWE_HARNESS_REF}"
+          fi
+
+      - name: Score against the hidden tests
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          touch "${RUNNER_TEMP}/run/diff.patch" 2>/dev/null || { mkdir -p "${RUNNER_TEMP}/run"; touch "${RUNNER_TEMP}/run/diff.patch"; }
+          PATH="${RUNNER_TEMP}/venv/bin:${PATH}" node scripts/score.mjs "tasks/${TASK_ID}.json" "${RUNNER_TEMP}/run/diff.patch" "${RUNNER_TEMP}/score.json"
+
+      - name: Post the result to Capsid
+        if: always()
+        env:
+          BENCH_KEY: ${{ secrets.BENCH_KEY }}
+          RUN_ID: ${{ needs.agent.outputs.run_id }}
+          JOB_ID: ${{ needs.agent.outputs.job_id }}
+          CLAIM: ${{ needs.agent.outputs.claim }}
+          IMAGE_BYTES: ${{ needs.agent.outputs.image_bytes }}
+          VERSION: ${{ needs.agent.outputs.version }}
+          READY: ${{ needs.agent.outputs.ready }}
+        run: |
+          set -euo pipefail
+          RESULTS=()
+          for turn in turn1 turn2; do
+            [ -f "${RUNNER_TEMP}/run/${turn}.json" ] && RESULTS+=(--result "${RUNNER_TEMP}/run/${turn}.json")
+          done
+          MODEL_ARG=()
+          case "${ARM}" in baseline|treatment) MODEL_ARG=(--model "${MODEL}") ;; esac
+          MACHINE=()
+          [ "${READY}" = 1 ] || MACHINE=(--machine-failed "the agent job failed before the task container was ready")
+          node scripts/report.mjs "${RUNNER_TEMP}/report.json" --run "${RUN_ID}" --arm "${ARM}" "${MACHINE[@]+"${MACHINE[@]}"}" \
+            --score "${RUNNER_TEMP}/score.json" "${RESULTS[@]+"${RESULTS[@]}"}" "${MODEL_ARG[@]+"${MODEL_ARG[@]}"}" \
+            --claim "${CLAIM}" --job "${JOB_ID}" --image-bytes "${IMAGE_BYTES}" --version "${VERSION}"
+          node scripts/sign-post.mjs /bench/score "${RUNNER_TEMP}/report.json"
