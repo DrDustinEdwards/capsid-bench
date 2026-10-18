@@ -299,7 +299,7 @@ jobs:
       - name: Install the benchmark harness
         run: |
           set -euo pipefail
-          SOURCE=$(node -p 'require(process.argv[1]).source' "tasks/${TASK_ID}.json")
+          SOURCE=$(node -p 'require(process.argv[1]).source' "./tasks/${TASK_ID}.json")
           if [ "${SOURCE}" != own ]; then
             [[ "${SWE_HARNESS_REF}" =~ ^[0-9a-f]{40}$ ]] || { echo "set the repo variable SWE_HARNESS_REF to a commit sha" >&2; exit 1; }
             python3 -m venv "${RUNNER_TEMP}/venv"
