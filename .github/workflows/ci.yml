@@ -33,3 +33,31 @@ jobs:
             # The file name is the task id, which is how a run finds it.
             [ "$(node -p 'require(process.argv[1]).task_id' "$PWD/$f")" = "$(basename "$f" .json)" ] || { echo "$f: file name and task_id differ" >&2; exit 1; }
           done
+
+  stop-agent:
+    # scripts/stop-agent.sh against a real container: a process left running after the
+    # clock ran out must be gone, the container's init must survive, and the marker must
+    # say the clock ran out. Any other exit code must leave everything alone.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Stop what the agent left running
+        run: |
+          set -euo pipefail
+          docker run -d --name task --entrypoint sleep node:26.11.1-bookworm@sha256:f1233c415b41ffcf237c717b3dea92e9d4ea006e0e4c71edcb790605d74f5404 infinity
+          docker exec -d task sh -c 'while true; do date > /tmp/still-writing; sleep 1; done'
+          sleep 2
+          scripts/stop-agent.sh 1 "${RUNNER_TEMP}/not-timed-out"
+          [ ! -e "${RUNNER_TEMP}/not-timed-out" ] || { echo "a non-timeout exit wrote the marker" >&2; exit 1; }
+          docker exec task sh -c 'ls /proc | grep -c "^[0-9]"' | awk '$1 < 3 { exit 1 }' || { echo "a non-timeout exit stopped processes" >&2; exit 1; }
+          scripts/stop-agent.sh 124 "${RUNNER_TEMP}/timed-out"
+          [ "$(cat "${RUNNER_TEMP}/timed-out")" = true ]
+          sleep 2
+          before=$(docker exec task cat /tmp/still-writing)
+          sleep 2
+          [ "$(docker exec task cat /tmp/still-writing)" = "${before}" ] || { echo "the left-over process is still writing" >&2; exit 1; }
+          [ "$(docker inspect -f '{{.State.Running}}' task)" = true ] || { echo "the container's init was killed" >&2; exit 1; }
