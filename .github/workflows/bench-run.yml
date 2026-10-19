@@ -44,6 +44,11 @@ env:
   ARM: ${{ inputs.arm }}
   # Pinned at registration (design section 6). Both arms read the same values.
   MODEL: claude-sonnet-5-5
+  # Equal for both arms (protocol section 2), frozen at registration.
+  PHASE1_TURNS: 80
+  PHASE1_MINUTES: 36
+  PHASE2_TURNS: 20
+  PHASE2_MINUTES: 9
   CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
   SWE_HARNESS_REF: ${{ vars.SWE_HARNESS_REF }}
   CAPSID_URL: https://mcp.dustinedwards.info
@@ -54,7 +59,9 @@ jobs:
   agent:
     name: agent (${{ inputs.arm }})
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    # Above both phases, the verifier's harness run (up to 30 minutes) and setup, so the
+    # phase clocks, not this, stop a model arm. A kill by this limit is unjudged.
+    timeout-minutes: 120
     outputs:
       run_id: ${{ steps.open.outputs.run_id }}
       job_id: ${{ steps.job.outputs.job_id }}
@@ -158,6 +165,9 @@ jobs:
           docker exec task git config --system --add safe.directory /testbed
           base=$(scripts/flatten-repo.sh)
           echo "base=${base}" >> "$GITHUB_OUTPUT"
+          # The claim tool both arms (and the planted arms) record their claim with.
+          docker cp scripts/bench-claim.sh task:/usr/local/bin/bench-claim
+          docker exec task chmod 755 /usr/local/bin/bench-claim
           # Only now is the machine known to be ready. Without this, a run whose image
           # never pulled would score as an empty diff instead of being unjudged.
           echo "ok=1" >> "$GITHUB_OUTPUT"
@@ -174,6 +184,25 @@ jobs:
           printf '%s' '{"mcpServers":{"capsid":{"type":"http","url":"https://mcp.dustinedwards.info/ops/mcp","headers":{"Authorization":"Bearer ${BENCH_DRIVER_KEY}"}}}}' > "${RUNNER_TEMP}/mcp.json"
           docker cp "${RUNNER_TEMP}/mcp.json" task:/tmp/mcp.json
 
+      - name: Compose the prompts
+        id: prompts
+        env:
+          JOB_ID: ${{ steps.job.outputs.job_id }}
+        run: |
+          set -euo pipefail
+          # The arms differ only by the job wrapper (protocol section 2): one shared system
+          # prompt, to which the treatment adds prompts/treatment.md, and a first message
+          # that is the fenced issue for the baseline and the job id for the treatment,
+          # whose job body carries the same fenced issue.
+          cp prompts/shared.md "${RUNNER_TEMP}/system.md"
+          if [ "${ARM}" = treatment ]; then
+            printf '\n%s' "$(cat prompts/treatment.md)" >> "${RUNNER_TEMP}/system.md"
+            printf 'Your Capsid job is %s.' "${JOB_ID}" > "${RUNNER_TEMP}/first.md"
+          else
+            cp "${RUNNER_TEMP}/stage/private/issue-message.md" "${RUNNER_TEMP}/first.md"
+          fi
+          sha256sum "${RUNNER_TEMP}/system.md" "${RUNNER_TEMP}/first.md" prompts/verifier.md
+
       - name: Run the planted arm (no model)
         if: inputs.arm == 'check-gold' || inputs.arm == 'check-false-claim'
         run: |
@@ -183,38 +212,29 @@ jobs:
           else
             docker exec task sh -c 'echo "planted by check-false-claim" > /testbed/BENCH_PLANTED.txt'
           fi
+          # The planted arms claim through the same tool and parser as the model arms,
+          # after a delivery mark like theirs.
+          scripts/copy-claims.sh "${RUNNER_TEMP}/claims-delivered.jsonl"
+          docker exec task /usr/local/bin/bench-claim done
 
-      - name: Run the baseline
-        if: inputs.arm == 'baseline'
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-        run: |
-          set -uo pipefail
-          timeout 45m docker exec -e CLAUDE_CODE_OAUTH_TOKEN -w /testbed task \
-            claude -p "$(cat "${RUNNER_TEMP}/stage/agent/problem.md")" \
-              --append-system-prompt "$(cat prompts/baseline.md)" \
-              --model "${MODEL}" --max-turns 100 --output-format json --dangerously-skip-permissions \
-            > "${RUNNER_TEMP}/turn1.json"
-          code=$?
-          [ "${code}" = 0 ] || echo "the baseline exited ${code}"
-          scripts/stop-agent.sh "${code}" "${RUNNER_TEMP}/timed-out"
-
-      - name: Run the treatment's first turn
+      - name: Run phase one
         id: turn1
-        if: inputs.arm == 'treatment'
+        if: inputs.arm == 'baseline' || inputs.arm == 'treatment'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          BENCH_DRIVER_KEY: ${{ secrets.BENCH_DRIVER_KEY }}
-          JOB_ID: ${{ steps.job.outputs.job_id }}
+          BENCH_DRIVER_KEY: ${{ inputs.arm == 'treatment' && secrets.BENCH_DRIVER_KEY || '' }}
         run: |
           set -uo pipefail
-          timeout 36m docker exec -e CLAUDE_CODE_OAUTH_TOKEN -e BENCH_DRIVER_KEY -w /testbed task \
-            claude -p "Your Capsid job is ${JOB_ID}." \
-              --append-system-prompt "$(cat prompts/treatment.md)" --mcp-config /tmp/mcp.json \
-              --model "${MODEL}" --max-turns 80 --output-format json --dangerously-skip-permissions \
+          ARGS=(-e CLAUDE_CODE_OAUTH_TOKEN)
+          MCP=()
+          if [ "${ARM}" = treatment ]; then ARGS+=(-e BENCH_DRIVER_KEY); MCP=(--mcp-config /tmp/mcp.json); fi
+          timeout "${PHASE1_MINUTES}m" docker exec "${ARGS[@]}" -w /testbed task \
+            claude -p "$(cat "${RUNNER_TEMP}/first.md")" \
+              --append-system-prompt "$(cat "${RUNNER_TEMP}/system.md")" "${MCP[@]+"${MCP[@]}"}" \
+              --model "${MODEL}" --max-turns "${PHASE1_TURNS}" --output-format json --dangerously-skip-permissions \
             > "${RUNNER_TEMP}/turn1.json"
           code=$?
-          [ "${code}" = 0 ] || echo "turn 1 exited ${code}"
+          [ "${code}" = 0 ] || echo "phase one exited ${code}"
           scripts/stop-agent.sh "${code}" "${RUNNER_TEMP}/timed-out"
           echo "session=$(node -p 'try { require(process.argv[1]).session_id ?? "" } catch { "" }' "${RUNNER_TEMP}/turn1.json")" >> "$GITHUB_OUTPUT"
 
@@ -227,37 +247,44 @@ jobs:
           docker exec task sh -c 'cd /testbed && git add -A && git diff --cached --binary "$0"' "${BASE}" > "${RUNNER_TEMP}/diff.patch" || true
           wc -c "${RUNNER_TEMP}/diff.patch"
 
-      - name: Install the benchmark harness (treatment verifier)
-        if: inputs.arm == 'treatment' && steps.task.outputs.source != 'own'
+      - name: Install the benchmark harness (verifier)
+        if: (inputs.arm == 'baseline' || inputs.arm == 'treatment') && steps.task.outputs.source != 'own'
         run: |
           set -euo pipefail
           [[ "${SWE_HARNESS_REF}" =~ ^[0-9a-f]{40}$ ]] || { echo "set the repo variable SWE_HARNESS_REF to a commit sha" >&2; exit 1; }
           python3 -m venv "${RUNNER_TEMP}/venv"
           "${RUNNER_TEMP}/venv/bin/pip" install --quiet "git+https://github.com/SWE-rebench/SWE-bench-fork@${SWE_HARNESS_REF}"
 
-      - name: Verify and run the treatment's second turn
-        if: inputs.arm == 'treatment'
+      - name: Verify, then run phase two
+        if: inputs.arm == 'baseline' || inputs.arm == 'treatment'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          BENCH_DRIVER_KEY: ${{ secrets.BENCH_DRIVER_KEY }}
+          BENCH_DRIVER_KEY: ${{ inputs.arm == 'treatment' && secrets.BENCH_DRIVER_KEY || '' }}
           SESSION: ${{ steps.turn1.outputs.session }}
           BASE: ${{ steps.ready.outputs.base }}
         run: |
           set -uo pipefail
-          # The secrets are in this step's env only for the docker exec below; the
-          # scorer that runs agent code starts with them removed.
+          if [ -f "${RUNNER_TEMP}/timed-out" ]; then echo "phase one ran out of time, so the verifier message is not delivered"; exit 0; fi
+          if [ -z "${SESSION}" ]; then echo "phase one left no session to resume"; exit 0; fi
+          # The verifier's time is outside both phase clocks. The secrets are in this
+          # step's env only for the docker exec below; the scorer that runs agent code
+          # starts with them removed.
           env -u CLAUDE_CODE_OAUTH_TOKEN -u BENCH_DRIVER_KEY PATH="${RUNNER_TEMP}/venv/bin:${PATH}" \
             node scripts/score.mjs "tasks/${TASK_ID}.json" "${RUNNER_TEMP}/diff.patch" "${RUNNER_TEMP}/verify.json"
           node scripts/verifier-message.mjs "${RUNNER_TEMP}/verify.json" > "${RUNNER_TEMP}/verifier.md"
-          if [ -f "${RUNNER_TEMP}/timed-out" ]; then echo "turn 1 ran out of time, so there is no second turn"; exit 0; fi
-          if [ -z "${SESSION}" ]; then echo "turn 1 left no session to resume"; exit 0; fi
-          timeout 9m docker exec -e CLAUDE_CODE_OAUTH_TOKEN -e BENCH_DRIVER_KEY -w /testbed task \
+          # The delivery mark: the claim file as it stood when the verifier message went
+          # in. Only lines after it count (scripts/read-claims.mjs).
+          scripts/copy-claims.sh "${RUNNER_TEMP}/claims-delivered.jsonl" || { echo "could not mark delivery"; exit 0; }
+          ARGS=(-e CLAUDE_CODE_OAUTH_TOKEN)
+          MCP=()
+          if [ "${ARM}" = treatment ]; then ARGS+=(-e BENCH_DRIVER_KEY); MCP=(--mcp-config /tmp/mcp.json); fi
+          timeout "${PHASE2_MINUTES}m" docker exec "${ARGS[@]}" -w /testbed task \
             claude -p "$(cat "${RUNNER_TEMP}/verifier.md")" --resume "${SESSION}" \
-              --append-system-prompt "$(cat prompts/treatment.md)" --mcp-config /tmp/mcp.json \
-              --model "${MODEL}" --max-turns 20 --output-format json --dangerously-skip-permissions \
+              --append-system-prompt "$(cat "${RUNNER_TEMP}/system.md")" "${MCP[@]+"${MCP[@]}"}" \
+              --model "${MODEL}" --max-turns "${PHASE2_TURNS}" --output-format json --dangerously-skip-permissions \
             > "${RUNNER_TEMP}/turn2.json"
           code=$?
-          [ "${code}" = 0 ] || echo "turn 2 exited ${code}"
+          [ "${code}" = 0 ] || echo "phase two exited ${code}"
           scripts/stop-agent.sh "${code}" "${RUNNER_TEMP}/timed-out"
           docker exec task sh -c 'cd /testbed && git add -A && git diff --cached --binary "$0"' "${BASE}" > "${RUNNER_TEMP}/diff.patch" || true
 
@@ -265,12 +292,13 @@ jobs:
         id: claim
         if: always() && steps.open.outputs.run_id != ''
         run: |
-          case "${ARM}" in
-            baseline) echo "claim=$(node scripts/parse-claim.mjs "${RUNNER_TEMP}/turn1.json")" >> "$GITHUB_OUTPUT" ;;
-            check-gold|check-false-claim) echo "claim=true" >> "$GITHUB_OUTPUT" ;;
-            # The treatment's claim is its job's status, read by Capsid.
-            *) echo "claim=" >> "$GITHUB_OUTPUT" ;;
-          esac
+          set -uo pipefail
+          # One parser for every arm. No delivery mark means no claim counts; the score
+          # job decides whether that run is scored or unjudged.
+          scripts/copy-claims.sh "${RUNNER_TEMP}/claims-final.jsonl" || true
+          node scripts/read-claims.mjs "${RUNNER_TEMP}/claims-final.jsonl" "${RUNNER_TEMP}/claims-delivered.jsonl" > "${RUNNER_TEMP}/claim.json"
+          cat "${RUNNER_TEMP}/claim.json"
+          echo "claim=$(node -p 'require(process.argv[1]).claimed_done' "${RUNNER_TEMP}/claim.json")" >> "$GITHUB_OUTPUT"
 
       - name: Show the egress log
         if: always()
@@ -289,6 +317,9 @@ jobs:
             ${{ runner.temp }}/turn2.json
             ${{ runner.temp }}/verify.json
             ${{ runner.temp }}/timed-out
+            ${{ runner.temp }}/claims-delivered.jsonl
+            ${{ runner.temp }}/claims-final.jsonl
+            ${{ runner.temp }}/claim.json
 
   score:
     name: score
@@ -351,6 +382,13 @@ jobs:
           [ -f "${RUNNER_TEMP}/run/timed-out" ] && TIMED_OUT=(--timed-out true)
           MACHINE=()
           [ "${READY}" = 1 ] || MACHINE=(--machine-failed "the agent job failed before the task container was ready")
+          # A model arm whose phase one ended inside its clock must have had the verifier
+          # message delivered; without the delivery mark its claim cannot be read, so the
+          # run is unjudged (protocol section 3). A phase-one clock kill has no delivery by
+          # design and is scored with no claim.
+          if [ "${READY}" = 1 ] && [ ! -f "${RUNNER_TEMP}/run/timed-out" ] && [ ! -f "${RUNNER_TEMP}/run/claims-delivered.jsonl" ]; then
+            MACHINE=(--machine-failed "the verifier message was never delivered, so the claim cannot be read")
+          fi
           node scripts/report.mjs "${RUNNER_TEMP}/report.json" --run "${RUN_ID}" --arm "${ARM}" "${MACHINE[@]+"${MACHINE[@]}"}" "${TIMED_OUT[@]+"${TIMED_OUT[@]}"}" \
             --score "${RUNNER_TEMP}/score.json" "${RESULTS[@]+"${RESULTS[@]}"}" "${MODEL_ARG[@]+"${MODEL_ARG[@]}"}" \
             --claim "${CLAIM}" --job "${JOB_ID}" --image-bytes "${IMAGE_BYTES}" --version "${VERSION}"

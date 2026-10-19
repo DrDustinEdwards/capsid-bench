@@ -6,7 +6,9 @@
 //   node scripts/task.mjs register tasks/x.json out.json  the /bench/tasks body
 //   node scripts/task.mjs stage tasks/x.json <dir>        <dir>/agent/problem.md, the only task
 //                                                         file the agent's container mounts, and
-//                                                         <dir>/private/ (gold.patch, setup.sh),
+//                                                         <dir>/private/ (gold.patch, setup.sh,
+//                                                         issue-message.md, the baseline's first
+//                                                         message),
 //                                                         which it never sees; image, source,
 //                                                         repo and base_commit to $GITHUB_OUTPUT
 //
@@ -16,6 +18,7 @@
 
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { withIssue } from "./issue.mjs";
 
 const SOURCES = ["swe-rebench", "swe-bench-live", "own"];
 const SPLITS = ["pilot", "full", "excluded"];
@@ -81,6 +84,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     writeFileSync(join(out, "agent", "problem.md"), task.problem_statement);
     writeFileSync(join(out, "private", "gold.patch"), task.gold_patch);
     writeFileSync(join(out, "private", "setup.sh"), task.setup ?? "");
+    writeFileSync(join(out, "private", "issue-message.md"), withIssue("issue.md", task.problem_statement, task.task_id));
     if (process.env.GITHUB_OUTPUT) {
       appendFileSync(process.env.GITHUB_OUTPUT, `image=${task.image}\nsource=${task.source}\nbase_commit=${task.base_commit}\nrepo=${task.repo}\n`);
     }

@@ -61,8 +61,9 @@ export function buildReport({ run, arm, score, results, claim, job, imageBytes, 
     run_id: run,
     environment,
     ...(environment.ok && score.hidden ? { hidden: score.hidden } : {}),
-    // The treatment's claim is read by Capsid from its job; the report carries none.
-    claimed_done: arm === "treatment" ? null : claim === true,
+    // Every arm's claim comes from the claim file (scripts/read-claims.mjs), read the
+    // same way; the treatment's job status is not its claim.
+    claimed_done: claim === true,
     capsid_job_id: job || null,
     usage: { model: model || null, claude_code_version: version || null, ...sumUsage(results) },
     image_bytes: Number.isInteger(imageBytes) ? imageBytes : null,

@@ -1,6 +1,7 @@
 #!/bin/sh
 # The claim tool both arms are given (protocol section 3), installed in the task
-# container as /usr/local/bin/bench-claim. It appends one line to /bench/claims.jsonl:
+# container as /usr/local/bin/bench-claim. It appends one line to /var/bench/claims.jsonl
+# (not /bench, which holds the staged problem and is mounted read-only):
 #
 #   bench-claim done        the issue is fixed and the registered tests pass
 #   bench-claim not-done    it is not
@@ -14,6 +15,6 @@ case "${1:-}" in
   done|not-done) ;;
   *) echo "usage: bench-claim done|not-done" >&2; exit 2 ;;
 esac
-mkdir -p /bench
-printf '{"claim":"%s","at":"%s"}\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" >> /bench/claims.jsonl
+mkdir -p /var/bench
+printf '{"claim":"%s","at":"%s"}\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" >> /var/bench/claims.jsonl
 echo "recorded: $1"
