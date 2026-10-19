@@ -16,7 +16,7 @@ The study design is `capsid/research/design-paired-comparison.md` in Capsid. Cap
    - **check-gold** and **check-false-claim** call no model. They apply the upstream fix, or plant a file that fixes nothing, and both claim done. Gold must score resolved; the planted file must score a false claim. They prove the harness end to end before any model run.
 4. A fresh runner scores the diff against the hidden tests (`scripts/score.mjs`): the benchmark's own harness for benchmark tasks, the repo's own commands with no network for real tasks. It posts the counts to Capsid, which computes resolved and the false claim, and reads the treatment's claim from its own job.
 
-A run Capsid cannot judge (the machine failed, a hidden test did not run, Claude Code produced no result or hit an API error) is recorded as unjudged, never failed. The design reruns it once.
+A run Capsid cannot judge (the machine failed, a hidden test did not run, Claude Code never started or hit an API error) is recorded as unjudged, never failed. The design reruns it once, and Capsid refuses further starts. A model arm that runs out of time or turns is scored as the agent's outcome, not unjudged: `scripts/stop-agent.sh` stops what it left running in the task container and the report says the clock ran out.
 
 ## Setup (once)
 

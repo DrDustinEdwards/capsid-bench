@@ -5,6 +5,7 @@
 //   node scripts/report.mjs out.json --run bench_x --arm baseline --score score.json \
 //     --result turn1.json [--result turn2.json] [--claim true] [--job job_x] \
 //     [--image-bytes N] [--model claude-sonnet-5-5] [--version 2.x.y] [--machine-failed reason]
+//     [--timed-out true]
 //
 // Usage is summed across turns. total_cost_usd is Claude Code's own client-side
 // estimate at API list prices: on the subscription it is not money spent, and the
@@ -37,20 +38,24 @@ export function sumUsage(results) {
   };
 }
 
-// Why a model arm's run is unjudged rather than scored, or null. Pre-registered: no
-// result at all (Claude Code killed at the time budget, or never started) and an error
-// during execution (an API or usage-limit failure) are the machine's, rerun once and then
-// excluded; hitting the turn limit is the agent's own outcome and is scored.
-export function modelFailure(arm, results) {
+// Why a model arm's run is unjudged rather than scored, or null. Only the machine's
+// failures are unjudged: Claude Code never started, or stopped with an error during
+// execution (an API or usage-limit failure); those are rerun once and then excluded.
+// Running out of time or turns is the agent's own outcome and is scored, because
+// dropping the slow runs would drop the runs most likely to fail (Grok's review,
+// change 1). A run killed by the clock leaves no result, so the workflow says so.
+export function modelFailure(arm, results, timedOut = false) {
   if (arm !== "baseline" && arm !== "treatment") return null;
-  const first = results[0];
-  if (!first || typeof first !== "object") return "Claude Code produced no result (killed at the time budget, or it never started)";
   const failed = results.find((r) => r && r.subtype === "error_during_execution");
-  return failed ? `Claude Code stopped with an error during execution: ${String(failed.result ?? "").slice(0, 200)}` : null;
+  if (failed) return `Claude Code stopped with an error during execution: ${String(failed.result ?? "").slice(0, 200)}`;
+  if (timedOut) return null;
+  const first = results[0];
+  if (!first || typeof first !== "object") return "Claude Code produced no result and was not killed at the time budget (it never started)";
+  return null;
 }
 
-export function buildReport({ run, arm, score, results, claim, job, imageBytes, model, version, machineFailed }) {
-  const failure = machineFailed || modelFailure(arm, results);
+export function buildReport({ run, arm, score, results, claim, job, imageBytes, model, version, machineFailed, timedOut }) {
+  const failure = machineFailed || modelFailure(arm, results, timedOut === true);
   const environment = failure ? { ok: false, reason: failure } : (score?.environment ?? { ok: false, reason: "the scorer produced no output" });
   return {
     run_id: run,
@@ -79,6 +84,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     else if (flag === "--model") opts.model = value;
     else if (flag === "--version") opts.version = value;
     else if (flag === "--machine-failed") opts.machineFailed = value;
+    else if (flag === "--timed-out") opts.timedOut = value === "true";
     else {
       console.error(`report: unknown flag ${flag}`);
       process.exit(2);
