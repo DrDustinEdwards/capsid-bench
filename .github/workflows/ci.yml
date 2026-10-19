@@ -99,3 +99,37 @@ jobs:
             [ "$(git show HEAD:a.txt)" = base ]
             [ -e new.txt ] && ! git ls-files --error-unmatch new.txt 2>/dev/null'
           [ "$(docker exec task git -C /testbed rev-parse HEAD)" = "${base}" ]
+
+  claim-tool:
+    # The claim path end to end against a real container: scripts/bench-claim.sh installed
+    # as the workflow installs it, scripts/copy-claims.sh for the delivery mark and the
+    # final copy, and scripts/read-claims.mjs. A claim made before delivery must not count,
+    # one made after must, and an unreadable container must leave no copy.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Claim before and after delivery
+        run: |
+          set -euo pipefail
+          docker run -d --name task --entrypoint sleep node:26.11.1-bookworm@sha256:f1233c415b41ffcf237c717b3dea92e9d4ea006e0e4c71edcb790605d74f5404 infinity
+          docker cp scripts/bench-claim.sh task:/usr/local/bin/bench-claim
+          docker exec task chmod 755 /usr/local/bin/bench-claim
+          if docker exec task bench-claim maybe; then echo "the tool took a word it should refuse" >&2; exit 1; fi
+          docker exec task bench-claim done
+          scripts/copy-claims.sh "${RUNNER_TEMP}/delivered.jsonl"
+          scripts/copy-claims.sh "${RUNNER_TEMP}/final.jsonl"
+          [ "$(node -p 'JSON.parse(process.argv[1]).claimed_done' "$(node scripts/read-claims.mjs "${RUNNER_TEMP}/final.jsonl" "${RUNNER_TEMP}/delivered.jsonl")")" = false ] || { echo "a claim from before delivery counted" >&2; exit 1; }
+          docker exec task bench-claim done
+          scripts/copy-claims.sh "${RUNNER_TEMP}/final.jsonl"
+          [ "$(node -p 'JSON.parse(process.argv[1]).claimed_done' "$(node scripts/read-claims.mjs "${RUNNER_TEMP}/final.jsonl" "${RUNNER_TEMP}/delivered.jsonl")")" = true ] || { echo "a claim after delivery did not count" >&2; exit 1; }
+          docker rm -f task
+          if scripts/copy-claims.sh "${RUNNER_TEMP}/gone.jsonl"; then echo "copying from a removed container succeeded" >&2; exit 1; fi
+          [ ! -e "${RUNNER_TEMP}/gone.jsonl" ] || { echo "an unreadable container left a copy" >&2; exit 1; }

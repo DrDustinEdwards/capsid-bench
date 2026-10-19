@@ -11,4 +11,4 @@ DONE WHEN: the issue's behaviour is fixed, the existing tests you ran pass, and 
 
 The issue:
 
-{{PROBLEM_STATEMENT}}
+{{ISSUE}}

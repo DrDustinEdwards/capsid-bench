@@ -6,23 +6,15 @@
 //
 // The title carries the run id, which is how Capsid ties the job's status back to this
 // run when it scores it (src/bench.ts). The body follows prompts/job-body.md, Capsid's
-// own GOAL / DO / OUT OF SCOPE / DONE WHEN layout, with the problem statement inserted.
+// own GOAL / DO / OUT OF SCOPE / DONE WHEN layout, with the fenced issue inserted.
 
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { withIssue } from "./issue.mjs";
 
-const here = dirname(fileURLToPath(import.meta.url));
-
-// The problem statement is outside text, so it goes in Capsid's external fence
-// (src/provenance.ts in capsid): the reader can tell it from the job's instructions, and
-// a "TODO:" in an issue is not refused as an unfilled placeholder. A line that would
-// close the fence is escaped, as Capsid's own externalFence does.
+// The job's body: Capsid's GOAL / DO / OUT OF SCOPE / DONE WHEN layout around the issue,
+// fenced exactly as the baseline receives it (scripts/issue.mjs).
 export function jobBody(problem, taskId) {
-  const escaped = problem.replace(/^([ \t]{0,3})(~{3,})/gm, (_m, indent, tildes) => `${indent}\\${tildes}`);
-  const ref = taskId.replace(/\s+/g, " ").slice(0, 120);
-  const fenced = `~~~external source=issue ref=${ref}\n${escaped}\n~~~`;
-  return readFileSync(join(here, "..", "prompts", "job-body.md"), "utf8").replace("{{PROBLEM_STATEMENT}}", () => fenced);
+  return withIssue("job-body.md", problem, taskId);
 }
 
 // A Streamable HTTP answer is JSON or an event stream; either way the JSON-RPC result is
