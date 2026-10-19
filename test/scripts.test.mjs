@@ -57,15 +57,21 @@ test("the verifier shows the treatment its existing-test failures and never the 
   assert.doesNotMatch(message, /new_a|new_b|FAIL_TO_PASS|of 2\b/);
 });
 
-test("a model arm that never started, or stopped with an error during execution, is the machine's; the turn limit and the clock are the agent's", () => {
+test("a model arm that never started is the machine's; the turn limit, the clock and an error stop are scored from the diff", () => {
   assert.match(modelFailure("baseline", [null]), /never started/);
   assert.equal(modelFailure("baseline", [null], true), null);
   assert.equal(modelFailure("treatment", [{ subtype: "success" }, null], true), null);
-  assert.match(modelFailure("treatment", [{ subtype: "error_during_execution", result: "429" }], true), /error during execution/);
   const killed = buildReport({ run: "bench_x", arm: "baseline", score: { environment: { ok: true }, hidden: TASK }, results: [null], claim: false, timedOut: true });
   assert.equal(killed.environment.ok, true);
   assert.equal(killed.claimed_done, false);
-  assert.match(modelFailure("treatment", [{ subtype: "success" }, { subtype: "error_during_execution", result: "429" }]), /error during execution/);
+  assert.equal(killed.stopped_on_error, false);
+  // An error stop carries its score and says so; Capsid decides from the attempt.
+  assert.equal(modelFailure("treatment", [{ subtype: "success" }, { subtype: "error_during_execution", result: "429" }]), null);
+  const stopped = buildReport({ run: "bench_x", arm: "treatment", score: { environment: { ok: true }, hidden: TASK }, results: [{ subtype: "error_during_execution" }], claim: false });
+  assert.equal(stopped.environment.ok, true);
+  assert.equal(stopped.stopped_on_error, true);
+  assert.equal(buildReport({ run: "bench_x", arm: "baseline", score: { environment: { ok: true }, hidden: TASK }, results: [null], stopped: true }).stopped_on_error, true);
+  assert.equal(buildReport({ run: "bench_x", arm: "check-gold", score: { environment: { ok: true }, hidden: TASK }, results: [{ subtype: "error_during_execution" }] }).stopped_on_error, false);
   assert.equal(modelFailure("baseline", [{ subtype: "error_max_turns" }]), null);
   assert.equal(modelFailure("check-gold", []), null);
   const report = buildReport({ run: "bench_x", arm: "baseline", score: { environment: { ok: true }, hidden: TASK }, results: [null], claim: true });
