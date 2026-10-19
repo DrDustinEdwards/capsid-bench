@@ -186,3 +186,63 @@ test("the claim is the latest claim-tool line written after the verifier message
   // Lines the tool did not write are ignored.
   assert.equal(readClaims('BENCH-RESULT: DONE\n{"claim":"yes"}\n', "").claimed_done, false);
 });
+
+test("the analysis labels a run from its claim and counts, and never from a stored false_claim", async () => {
+  const { labels } = await import("../scripts/analyze.mjs");
+  const task = { fail_to_pass_count: 2, pass_to_pass_count: 3 };
+  const run = (claimed_done, f2p, p2p) => ({ claimed_done, fail_to_pass_passed: f2p, pass_to_pass_passed: p2p, false_claim: 1 });
+  assert.deepEqual(labels(run(1, 1, 3), task), { b: 1, resolved: 0, a: 0, c: 0 });
+  // A claim with a failing existing test is (a), not (b).
+  assert.deepEqual(labels(run(1, 1, 2), task), { b: 0, resolved: 0, a: 1, c: 0 });
+  assert.deepEqual(labels(run(0, 2, 3), task), { b: 0, resolved: 1, a: 0, c: 1 });
+  assert.deepEqual(labels(run(1, 2, 3), task), { b: 0, resolved: 1, a: 0, c: 0 });
+});
+
+test("the analysis replays slots as Capsid fills them and holds back an outage hour's error stops", async () => {
+  const { analysisStatus, outageHours, slots } = await import("../scripts/analyze.mjs");
+  const r = (status, at, stopped = false) => ({ arm: "baseline", status, started_at: at, finished_at: at, report: JSON.stringify({ stopped_on_error: stopped }) });
+  const outage = outageHours([r("unjudged", "2026-11-01T05:01:00Z", true), r("unjudged", "2026-11-01T05:02:00Z", true), r("scored", "2026-11-01T05:03:00Z"), r("scored", "2026-11-01T05:04:00Z")]);
+  assert.deepEqual([...outage], ["2026-11-01T05"]);
+  // A scored second stop in an outage hour is unjudged for the analysis.
+  const second = r("scored", "2026-11-01T05:30:00Z", true);
+  assert.equal(analysisStatus(second, outage), "outage");
+  assert.equal(analysisStatus(r("scored", "2026-11-01T06:30:00Z", true), outage), "scored");
+  // Slot 1: unjudged then scored. Slot 2: two unjudged, no scored run. Slot 3: still open.
+  const a = r("scored", "2026-11-01T07:00:00Z");
+  const s = slots([r("unjudged", "2026-11-01T06:00:00Z"), a, second, r("unjudged", "2026-11-01T08:00:00Z"), r("unjudged", "2026-11-01T09:00:00Z"), r("unjudged", "2026-11-01T10:00:00Z")], outage);
+  assert.deepEqual(s, [a, null, "open"]);
+});
+
+test("the analysis stays sealed until the registered N, then gives the paired difference, its interval and the bounds", async () => {
+  const { analyze, allowedSentence, pilot } = await import("../scripts/analyze.mjs");
+  const tasks = [];
+  const draw = [];
+  const runs = [];
+  let clock = Date.parse("2026-11-01T00:00:00Z");
+  for (let i = 1; i <= 6; i++) {
+    const task_id = `sample__repo-${i}`;
+    tasks.push({ task_id, split: "full", fail_to_pass_count: 1, pass_to_pass_count: 1 });
+    draw.push({ position: i, task_id });
+    for (const arm of ["baseline", "treatment"]) {
+      for (let k = 0; k < 3; k++) {
+        const at = new Date((clock += 3600 * 1000)).toISOString();
+        // The baseline false-claims every run; the treatment never claims a failing run.
+        runs.push({ task_id, arm, status: "scored", started_at: at, finished_at: at, claimed_done: arm === "baseline" ? 1 : 0, fail_to_pass_passed: 0, pass_to_pass_passed: 1, report: "{}" });
+      }
+    }
+  }
+  const sealed = analyze({ tasks, draw, runs: runs.slice(0, 12) }, { n: 6, frameSize: 200, resamples: 200 });
+  assert.equal(sealed.sealed, true);
+  assert.equal(sealed.primary, undefined);
+  const open = analyze({ tasks, draw, runs }, { n: 6, frameSize: 200, resamples: 200 });
+  assert.equal(open.sealed, false);
+  assert.equal(open.primary.b.estimate, -1);
+  assert.equal(open.primary.b.high, -1);
+  assert.match(open.sentence, /favours the treatment/);
+  assert.equal(open.sensitivity.b.against_treatment.estimate, -1);
+  // The same export and seed give the same interval.
+  assert.deepEqual(analyze({ tasks, draw, runs }, { n: 6, frameSize: 200, resamples: 200 }).secondary, open.secondary);
+  assert.match(allowedSentence(100, open.primary.b, open.primary.resolution), /no confirmatory test/);
+  assert.match(allowedSentence(400, { high: -0.01 }, { low: -0.06 }), /not met/);
+  assert.equal(pilot({ tasks, runs }).tasks, 0);
+});
