@@ -9,7 +9,7 @@ The study design is `capsid/research/design-paired-comparison.md` in Capsid. Cap
 `bench-run.yml`, started by hand with a task id and an arm:
 
 1. Capsid opens the run, or refuses: the switch is off, 4 runs are already going, or the task is unknown.
-2. The task's image starts with its repository at `/testbed`. Its only way out is an allowlist proxy (`scripts/egress-proxy.mjs`): `api.anthropic.com`, plus Capsid's host for the treatment. The benchmark datasets are public, so this is what keeps the hidden tests hidden.
+2. The task's image starts with its repository at `/testbed`, reduced by `scripts/flatten-repo.sh` to one commit holding the base tree, with no remotes and no later objects, so the fix is not in its history. Its only way out is an allowlist proxy (`scripts/egress-proxy.mjs`): `api.anthropic.com`, plus Capsid's host for the treatment. The benchmark datasets are public, so this is what keeps the hidden tests hidden.
 3. The arm runs, with `claude-sonnet-5-5` and the Claude Code version in the `CLAUDE_CODE_VERSION` variable:
    - **baseline**: one `claude -p` with `prompts/baseline.md`: plan, run the tests, have a subagent review the diff, end with `BENCH-RESULT: DONE` or `NOT-DONE`. 100 turns, 45 minutes.
    - **treatment**: the task is posted as a signed Capsid job in the `bench` namespace (`prompts/job-body.md`). The agent claims it over MCP and works from its body (`prompts/treatment.md`, 80 turns). An independent verifier then runs the repository's existing tests on its diff and sends back what failed, never the new tests (`scripts/verifier-message.mjs`). In a second turn (20 turns) the agent fixes what it broke and ends the job with `complete` and a claim, or `fail`.
