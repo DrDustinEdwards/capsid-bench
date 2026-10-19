@@ -61,6 +61,15 @@ jobs:
           sleep 2
           [ "$(docker exec task cat /tmp/still-writing)" = "${before}" ] || { echo "the left-over process is still writing" >&2; exit 1; }
           [ "$(docker inspect -f '{{.State.Running}}' task)" = true ] || { echo "the container's init was killed" >&2; exit 1; }
+          # An error stop stops leftovers the same way and writes its own marker.
+          docker exec -d task sh -c 'while true; do date > /tmp/after-error; sleep 1; done'
+          sleep 2
+          scripts/stop-agent.sh error "${RUNNER_TEMP}/stopped-on-error"
+          [ "$(cat "${RUNNER_TEMP}/stopped-on-error")" = true ]
+          sleep 2
+          before=$(docker exec task cat /tmp/after-error)
+          sleep 2
+          [ "$(docker exec task cat /tmp/after-error)" = "${before}" ] || { echo "a process left after an error stop is still writing" >&2; exit 1; }
 
   flatten-repo:
     # scripts/flatten-repo.sh against a real container: after it, /testbed must hold one

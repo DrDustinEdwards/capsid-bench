@@ -236,6 +236,12 @@ jobs:
           code=$?
           [ "${code}" = 0 ] || echo "phase one exited ${code}"
           scripts/stop-agent.sh "${code}" "${RUNNER_TEMP}/timed-out"
+          # An error stop (a usage limit or a transport error, not told apart) ends the run
+          # like a clock kill: no verifier message, scored from the diff, and Capsid decides
+          # from the slot's attempt whether it counts.
+          if [ "$(node -p 'try { require(process.argv[1]).subtype ?? "" } catch { "" }' "${RUNNER_TEMP}/turn1.json")" = error_during_execution ]; then
+            scripts/stop-agent.sh error "${RUNNER_TEMP}/stopped-on-error"
+          fi
           echo "session=$(node -p 'try { require(process.argv[1]).session_id ?? "" } catch { "" }' "${RUNNER_TEMP}/turn1.json")" >> "$GITHUB_OUTPUT"
 
       - name: Take the diff
@@ -265,6 +271,7 @@ jobs:
         run: |
           set -uo pipefail
           if [ -f "${RUNNER_TEMP}/timed-out" ]; then echo "phase one ran out of time, so the verifier message is not delivered"; exit 0; fi
+          if [ -f "${RUNNER_TEMP}/stopped-on-error" ]; then echo "phase one stopped with an error during execution, so the verifier message is not delivered"; exit 0; fi
           if [ -z "${SESSION}" ]; then echo "phase one left no session to resume"; exit 0; fi
           # The verifier's time is outside both phase clocks. The secrets are in this
           # step's env only for the docker exec below; the scorer that runs agent code
@@ -286,6 +293,9 @@ jobs:
           code=$?
           [ "${code}" = 0 ] || echo "phase two exited ${code}"
           scripts/stop-agent.sh "${code}" "${RUNNER_TEMP}/timed-out"
+          if [ "$(node -p 'try { require(process.argv[1]).subtype ?? "" } catch { "" }' "${RUNNER_TEMP}/turn2.json")" = error_during_execution ]; then
+            scripts/stop-agent.sh error "${RUNNER_TEMP}/stopped-on-error"
+          fi
           docker exec task sh -c 'cd /testbed && git add -A && git diff --cached --binary "$0"' "${BASE}" > "${RUNNER_TEMP}/diff.patch" || true
 
       - name: Read the claim
@@ -299,6 +309,17 @@ jobs:
           node scripts/read-claims.mjs "${RUNNER_TEMP}/claims-final.jsonl" "${RUNNER_TEMP}/claims-delivered.jsonl" > "${RUNNER_TEMP}/claim.json"
           cat "${RUNNER_TEMP}/claim.json"
           echo "claim=$(node -p 'require(process.argv[1]).claimed_done' "${RUNNER_TEMP}/claim.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Close the treatment's job
+        if: always() && steps.job.outputs.job_id != ''
+        env:
+          BENCH_DRIVER_KEY: ${{ secrets.BENCH_DRIVER_KEY }}
+          JOB_ID: ${{ steps.job.outputs.job_id }}
+        run: |
+          set -uo pipefail
+          # After the agent has exited and the claim file is copied, so the close cannot
+          # touch the claim. The job's status is not an outcome (protocol section 3).
+          node scripts/post-job.mjs --close "${JOB_ID}" || echo "::warning::the treatment job ${JOB_ID} is still open; the seat fails it by hand"
 
       - name: Show the egress log
         if: always()
@@ -317,6 +338,7 @@ jobs:
             ${{ runner.temp }}/turn2.json
             ${{ runner.temp }}/verify.json
             ${{ runner.temp }}/timed-out
+            ${{ runner.temp }}/stopped-on-error
             ${{ runner.temp }}/claims-delivered.jsonl
             ${{ runner.temp }}/claims-final.jsonl
             ${{ runner.temp }}/claim.json
@@ -386,10 +408,12 @@ jobs:
           # message delivered; without the delivery mark its claim cannot be read, so the
           # run is unjudged (protocol section 3). A phase-one clock kill has no delivery by
           # design and is scored with no claim.
-          if [ "${READY}" = 1 ] && [ ! -f "${RUNNER_TEMP}/run/timed-out" ] && [ ! -f "${RUNNER_TEMP}/run/claims-delivered.jsonl" ]; then
+          STOPPED=()
+          [ -f "${RUNNER_TEMP}/run/stopped-on-error" ] && STOPPED=(--stopped-on-error true)
+          if [ "${READY}" = 1 ] && [ ! -f "${RUNNER_TEMP}/run/timed-out" ] && [ ! -f "${RUNNER_TEMP}/run/stopped-on-error" ] && [ ! -f "${RUNNER_TEMP}/run/claims-delivered.jsonl" ]; then
             MACHINE=(--machine-failed "the verifier message was never delivered, so the claim cannot be read")
           fi
-          node scripts/report.mjs "${RUNNER_TEMP}/report.json" --run "${RUN_ID}" --arm "${ARM}" "${MACHINE[@]+"${MACHINE[@]}"}" "${TIMED_OUT[@]+"${TIMED_OUT[@]}"}" \
+          node scripts/report.mjs "${RUNNER_TEMP}/report.json" --run "${RUN_ID}" --arm "${ARM}" "${MACHINE[@]+"${MACHINE[@]}"}" "${TIMED_OUT[@]+"${TIMED_OUT[@]}"}" "${STOPPED[@]+"${STOPPED[@]}"}" \
             --score "${RUNNER_TEMP}/score.json" "${RESULTS[@]+"${RESULTS[@]}"}" "${MODEL_ARG[@]+"${MODEL_ARG[@]}"}" \
             --claim "${CLAIM}" --job "${JOB_ID}" --image-bytes "${IMAGE_BYTES}" --version "${VERSION}"
           node scripts/sign-post.mjs /bench/score "${RUNNER_TEMP}/report.json"
