@@ -156,6 +156,8 @@ jobs:
           # An own task's /testbed is the runner's clone, owned by another uid than the
           # container's root, so git refuses it ("dubious ownership") and the diff comes out empty.
           docker exec task git config --system --add safe.directory /testbed
+          base=$(scripts/flatten-repo.sh)
+          echo "base=${base}" >> "$GITHUB_OUTPUT"
           # Only now is the machine known to be ready. Without this, a run whose image
           # never pulled would score as an empty diff instead of being unjudged.
           echo "ok=1" >> "$GITHUB_OUTPUT"
@@ -219,7 +221,7 @@ jobs:
       - name: Take the diff
         if: always() && steps.open.outputs.run_id != ''
         env:
-          BASE: ${{ steps.task.outputs.base_commit }}
+          BASE: ${{ steps.ready.outputs.base }}
         run: |
           set -uo pipefail
           docker exec task sh -c 'cd /testbed && git add -A && git diff --cached --binary "$0"' "${BASE}" > "${RUNNER_TEMP}/diff.patch" || true
@@ -239,7 +241,7 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           BENCH_DRIVER_KEY: ${{ secrets.BENCH_DRIVER_KEY }}
           SESSION: ${{ steps.turn1.outputs.session }}
-          BASE: ${{ steps.task.outputs.base_commit }}
+          BASE: ${{ steps.ready.outputs.base }}
         run: |
           set -uo pipefail
           # The secrets are in this step's env only for the docker exec below; the

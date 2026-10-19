@@ -61,3 +61,41 @@ jobs:
           sleep 2
           [ "$(docker exec task cat /tmp/still-writing)" = "${before}" ] || { echo "the left-over process is still writing" >&2; exit 1; }
           [ "$(docker inspect -f '{{.State.Running}}' task)" = true ] || { echo "the container's init was killed" >&2; exit 1; }
+
+  flatten-repo:
+    # scripts/flatten-repo.sh against a real container: after it, /testbed must hold one
+    # commit and no remotes, the later commit's object must be gone, and every file the
+    # base tracked (one a .gitignore matches included) must be in that commit unchanged.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Flatten a repo with a later fix in its history
+        run: |
+          set -euo pipefail
+          docker run -d --name task --entrypoint sleep node:26.11.1-bookworm@sha256:f1233c415b41ffcf237c717b3dea92e9d4ea006e0e4c71edcb790605d74f5404 infinity
+          docker exec task sh -c '
+            set -e
+            git config --global user.name t; git config --global user.email t@example.com
+            mkdir /testbed; cd /testbed; git init -q
+            printf "ignored.txt\n" > .gitignore
+            printf "base\n" > a.txt; printf "kept\n" > ignored.txt; mkdir -p "d [x]"; printf "glob\n" > "d [x]/*.txt"
+            git add .gitignore a.txt "d [x]/*.txt"; git add -f ignored.txt; git commit -q -m base
+            printf "fix\n" > a.txt; git commit -q -am fix; git rev-parse HEAD > /tmp/fix-sha
+            git checkout -q HEAD~1; git remote add origin https://example.com/x.git
+            printf "untracked\n" > new.txt'
+          base=$(scripts/flatten-repo.sh)
+          [[ "${base}" =~ ^[0-9a-f]{40}$ ]] || { echo "no sha printed: ${base}" >&2; exit 1; }
+          docker exec task sh -c '
+            set -e
+            cd /testbed
+            [ "$(git rev-list --all | wc -l)" = 1 ] || { echo "more than one commit" >&2; exit 1; }
+            [ -z "$(git remote)" ] || { echo "a remote is left" >&2; exit 1; }
+            ! git cat-file -e "$(cat /tmp/fix-sha)" 2>/dev/null || { echo "the fix commit is still readable" >&2; exit 1; }
+            [ "$(git ls-files | sort | tr "\n" " ")" = ".gitignore a.txt d [x]/*.txt ignored.txt " ] || { echo "tracked files differ: $(git ls-files)" >&2; exit 1; }
+            [ "$(git show HEAD:a.txt)" = base ]
+            [ -e new.txt ] && ! git ls-files --error-unmatch new.txt 2>/dev/null'
+          [ "$(docker exec task git -C /testbed rev-parse HEAD)" = "${base}" ]
