@@ -26,11 +26,29 @@ A run Capsid cannot judge (the machine failed, a hidden test did not run, Claude
 - Secrets: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`, Dustin's subscription), `BENCH_KEY` (`node scripts/improve-derive-key.mjs --bench` in capsid), `BENCH_DRIVER_KEY` (a Capsid driver key for the `bench` namespace, no flags).
 - Never set `ANTHROPIC_API_KEY` here: it would win over the token and bill the Console account. The run refuses to start if it is set.
 - Variables: `CLAUDE_CODE_VERSION` and `SWE_HARNESS_REF` (a commit of [SWE-rebench/SWE-bench-fork](https://github.com/SWE-rebench/SWE-bench-fork)), both fixed at pre-registration.
-- In Capsid: migration 0047 applied, the `bench` namespace created, and KV `bench:enabled` set to `on` only while runs are wanted.
+- In Capsid: migrations 0047 and 0049 applied, the `bench` namespace created, and KV `bench:enabled` set to `on` only while runs are wanted.
 
 ## Tasks
 
 `tasks/<task_id>.json`, one file per task; the format is in [tasks/README.md](tasks/README.md). `bench-load.yml` writes benchmark tasks from Hugging Face and registers them with Capsid, which then refuses any change to them.
+
+## Analysis
+
+`scripts/analyze.mjs` is the hashed analysis (the protocol's section 6). It labels each scored run from its claim and its two hidden test counts against the registered counts, never from Capsid's stored `false_claim` column. It treats a scored second error stop that ended in an outage hour as unjudged, and replays each task's slots as Capsid fills them. Its estimate is the mean within-task difference, treatment minus baseline, with a seeded cluster bootstrap over tasks (10,000 resamples). It also prints the bounds for slots with no scored run, the flagged-task sensitivity and the secondary outcomes, and names the sentence the frame size allows. Until the registered N drawn tasks are included or the frame is exhausted, it prints run counts only and exits 3. `--pilot` computes the pilot's one stopping rule from the baseline alone.
+
+```
+node scripts/analyze.mjs export.json --n <registered N> --frame-size <audited tasks> --seed <sampling seed> [--flagged flagged.json]
+```
+
+### Exporting the data
+
+`export.json` is `{ "tasks": [...], "draw": [...], "runs": [...] }`, the rows of three reads of Capsid's D1:
+
+```
+SELECT task_id, split, fail_to_pass_count, pass_to_pass_count FROM bench_tasks;
+SELECT position, task_id FROM bench_draw;
+SELECT id, task_id, arm, status, started_at, finished_at, claimed_done, fail_to_pass_passed, pass_to_pass_passed, turns, output_tokens, duration_ms, report FROM bench_runs;
+```
 
 ## Not yet verified
 
