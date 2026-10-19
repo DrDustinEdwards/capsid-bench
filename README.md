@@ -14,7 +14,8 @@ The study design is `capsid/research/design-paired-comparison.md` in Capsid. Cap
    - Both get the system prompt `prompts/shared.md`. The treatment's system prompt adds `prompts/treatment.md`.
    - The baseline's first message is the issue (`prompts/issue.md`). The treatment's task is posted as a signed Capsid job in the `bench` namespace (`prompts/job-body.md`), its first message is the job's id, and it reaches Capsid over MCP. Both see the issue in the same external fence (`scripts/issue.mjs`).
    - Both have the same two phases, frozen in the workflow's `PHASE1_*` and `PHASE2_*` values: phase one is 80 turns and 36 minutes. Then an independent verifier runs the repository's existing tests on the diff and sends back what failed, never the new tests (`scripts/verifier-message.mjs`, `prompts/verifier.md`). Phase two is 20 turns and 9 minutes. Neither arm is told to use a subagent.
-   - **The treatment's job** is closed after the run by `scripts/post-job.mjs --close`, with supersede and a fixed reason. Its status is not an outcome.
+   - **The run key.** A treatment run's agent holds only its run's own Capsid key, returned by `/bench/start`, masked and passed into the container as `CAPSID_RUN_KEY`. It can claim its one job and read it by id, nothing else, and stops working when the run is scored. The harness posts the job with `BENCH_DRIVER_KEY`, which never enters the container.
+   - **The treatment's job** is closed by Capsid's `/bench/score` in the same step that scores the run, with supersede and a fixed reason. Its status is not an outcome.
    - **The claim** is the claim tool, for every arm: `bench-claim done|not-done` appends to a claim file in the container (`scripts/bench-claim.sh`). The file is copied out when the verifier message is delivered and again at the end, and `scripts/read-claims.mjs` counts only the latest line written after delivery. The treatment's job status is not its claim.
    - **check-gold** and **check-false-claim** call no model. They apply the upstream fix, or plant a file that fixes nothing, and both claim done through the same tool. Gold must score resolved, and the planted file must score a false claim. They prove the harness end to end before any model run.
 4. A fresh runner scores the diff against the hidden tests (`scripts/score.mjs`): the benchmark's own harness for benchmark tasks, the repo's own commands with no network for real tasks. It posts the counts and the claim to Capsid, which computes resolved and the false claim.
@@ -23,7 +24,7 @@ A run Capsid cannot judge (the machine failed, a hidden test did not run, Claude
 
 ## Setup (once)
 
-- Secrets: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`, Dustin's subscription), `BENCH_KEY` (`node scripts/improve-derive-key.mjs --bench` in capsid), `BENCH_DRIVER_KEY` (a Capsid driver key for the `bench` namespace, no flags).
+- Secrets: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`, Dustin's subscription), `BENCH_KEY` (`node scripts/improve-derive-key.mjs --bench` in capsid), `BENCH_DRIVER_KEY` (a Capsid driver key for the `bench` namespace, no flags, narrowed to posting: tools `capsid_work_jobs` and `capsid_work_jobs.post`).
 - Never set `ANTHROPIC_API_KEY` here: it would win over the token and bill the Console account. The run refuses to start if it is set.
 - Variables: `CLAUDE_CODE_VERSION` and `SWE_HARNESS_REF` (a commit of [SWE-rebench/SWE-bench-fork](https://github.com/SWE-rebench/SWE-bench-fork)), both fixed at pre-registration.
 - In Capsid: migrations 0047 and 0049 applied, the `bench` namespace created, and KV `bench:enabled` set to `on` only while runs are wanted.
