@@ -192,7 +192,10 @@ jobs:
             claude -p "$(cat "${RUNNER_TEMP}/stage/agent/problem.md")" \
               --append-system-prompt "$(cat prompts/baseline.md)" \
               --model "${MODEL}" --max-turns 100 --output-format json --dangerously-skip-permissions \
-            > "${RUNNER_TEMP}/turn1.json" || echo "the baseline exited $?"
+            > "${RUNNER_TEMP}/turn1.json"
+          code=$?
+          [ "${code}" = 0 ] || echo "the baseline exited ${code}"
+          scripts/stop-agent.sh "${code}" "${RUNNER_TEMP}/timed-out"
 
       - name: Run the treatment's first turn
         id: turn1
@@ -207,7 +210,10 @@ jobs:
             claude -p "Your Capsid job is ${JOB_ID}." \
               --append-system-prompt "$(cat prompts/treatment.md)" --mcp-config /tmp/mcp.json \
               --model "${MODEL}" --max-turns 80 --output-format json --dangerously-skip-permissions \
-            > "${RUNNER_TEMP}/turn1.json" || echo "turn 1 exited $?"
+            > "${RUNNER_TEMP}/turn1.json"
+          code=$?
+          [ "${code}" = 0 ] || echo "turn 1 exited ${code}"
+          scripts/stop-agent.sh "${code}" "${RUNNER_TEMP}/timed-out"
           echo "session=$(node -p 'try { require(process.argv[1]).session_id ?? "" } catch { "" }' "${RUNNER_TEMP}/turn1.json")" >> "$GITHUB_OUTPUT"
 
       - name: Take the diff
@@ -241,12 +247,16 @@ jobs:
           env -u CLAUDE_CODE_OAUTH_TOKEN -u BENCH_DRIVER_KEY PATH="${RUNNER_TEMP}/venv/bin:${PATH}" \
             node scripts/score.mjs "tasks/${TASK_ID}.json" "${RUNNER_TEMP}/diff.patch" "${RUNNER_TEMP}/verify.json"
           node scripts/verifier-message.mjs "${RUNNER_TEMP}/verify.json" > "${RUNNER_TEMP}/verifier.md"
+          if [ -f "${RUNNER_TEMP}/timed-out" ]; then echo "turn 1 ran out of time, so there is no second turn"; exit 0; fi
           if [ -z "${SESSION}" ]; then echo "turn 1 left no session to resume"; exit 0; fi
           timeout 9m docker exec -e CLAUDE_CODE_OAUTH_TOKEN -e BENCH_DRIVER_KEY -w /testbed task \
             claude -p "$(cat "${RUNNER_TEMP}/verifier.md")" --resume "${SESSION}" \
               --append-system-prompt "$(cat prompts/treatment.md)" --mcp-config /tmp/mcp.json \
               --model "${MODEL}" --max-turns 20 --output-format json --dangerously-skip-permissions \
-            > "${RUNNER_TEMP}/turn2.json" || echo "turn 2 exited $?"
+            > "${RUNNER_TEMP}/turn2.json"
+          code=$?
+          [ "${code}" = 0 ] || echo "turn 2 exited ${code}"
+          scripts/stop-agent.sh "${code}" "${RUNNER_TEMP}/timed-out"
           docker exec task sh -c 'cd /testbed && git add -A && git diff --cached --binary "$0"' "${BASE}" > "${RUNNER_TEMP}/diff.patch" || true
 
       - name: Read the claim
@@ -276,6 +286,7 @@ jobs:
             ${{ runner.temp }}/turn1.json
             ${{ runner.temp }}/turn2.json
             ${{ runner.temp }}/verify.json
+            ${{ runner.temp }}/timed-out
 
   score:
     name: score
@@ -334,9 +345,11 @@ jobs:
           done
           MODEL_ARG=()
           case "${ARM}" in baseline|treatment) MODEL_ARG=(--model "${MODEL}") ;; esac
+          TIMED_OUT=()
+          [ -f "${RUNNER_TEMP}/run/timed-out" ] && TIMED_OUT=(--timed-out true)
           MACHINE=()
           [ "${READY}" = 1 ] || MACHINE=(--machine-failed "the agent job failed before the task container was ready")
-          node scripts/report.mjs "${RUNNER_TEMP}/report.json" --run "${RUN_ID}" --arm "${ARM}" "${MACHINE[@]+"${MACHINE[@]}"}" \
+          node scripts/report.mjs "${RUNNER_TEMP}/report.json" --run "${RUN_ID}" --arm "${ARM}" "${MACHINE[@]+"${MACHINE[@]}"}" "${TIMED_OUT[@]+"${TIMED_OUT[@]}"}" \
             --score "${RUNNER_TEMP}/score.json" "${RESULTS[@]+"${RESULTS[@]}"}" "${MODEL_ARG[@]+"${MODEL_ARG[@]}"}" \
             --claim "${CLAIM}" --job "${JOB_ID}" --image-bytes "${IMAGE_BYTES}" --version "${VERSION}"
           node scripts/sign-post.mjs /bench/score "${RUNNER_TEMP}/report.json"
