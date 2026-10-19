@@ -106,6 +106,15 @@ jobs:
           node -e 'process.stdout.write(JSON.stringify({ task_id: process.env.TASK_ID, arm: process.env.ARM, gh_run: `${process.env.GITHUB_RUN_ID}.${process.env.GITHUB_RUN_ATTEMPT}` }))' > "${RUNNER_TEMP}/start.json"
           node scripts/sign-post.mjs /bench/start "${RUNNER_TEMP}/start.json" > "${RUNNER_TEMP}/started.json"
           echo "run_id=$(node -p 'require(process.argv[1]).run_id' "${RUNNER_TEMP}/started.json")" >> "$GITHUB_OUTPUT"
+          # A treatment run's own Capsid key (protocol section 4, "The run key"): masked,
+          # kept in a file this job alone reads, and taken out of the response.
+          if [ "${ARM}" = treatment ]; then
+            key=$(node -p 'require(process.argv[1]).run_key ?? ""' "${RUNNER_TEMP}/started.json")
+            [ -n "${key}" ] || { echo "/bench/start returned no run key for a treatment run" >&2; exit 1; }
+            echo "::add-mask::${key}"
+            (umask 077; printf '%s' "${key}" > "${RUNNER_TEMP}/run-key")
+            node -e 'const f=process.argv[1]; const r=require(f); delete r.run_key; require("fs").writeFileSync(f, JSON.stringify(r))' "${RUNNER_TEMP}/started.json"
+          fi
 
       - name: Prepare the task's container
         id: prepare
@@ -180,8 +189,10 @@ jobs:
           RUN_ID: ${{ steps.open.outputs.run_id }}
         run: |
           set -euo pipefail
+          # The harness posts the job with the bench driver key, which never enters the
+          # container. The agent holds only the run key, read from its env by Claude Code.
           echo "job_id=$(node scripts/post-job.mjs "${RUN_ID}" "${TASK_ID}" "${RUNNER_TEMP}/stage/agent/problem.md")" >> "$GITHUB_OUTPUT"
-          printf '%s' '{"mcpServers":{"capsid":{"type":"http","url":"https://mcp.dustinedwards.info/ops/mcp","headers":{"Authorization":"Bearer ${BENCH_DRIVER_KEY}"}}}}' > "${RUNNER_TEMP}/mcp.json"
+          printf '%s' '{"mcpServers":{"capsid":{"type":"http","url":"https://mcp.dustinedwards.info/ops/mcp","headers":{"Authorization":"Bearer ${CAPSID_RUN_KEY}"}}}}' > "${RUNNER_TEMP}/mcp.json"
           docker cp "${RUNNER_TEMP}/mcp.json" task:/tmp/mcp.json
 
       - name: Compose the prompts
@@ -222,12 +233,11 @@ jobs:
         if: inputs.arm == 'baseline' || inputs.arm == 'treatment'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          BENCH_DRIVER_KEY: ${{ inputs.arm == 'treatment' && secrets.BENCH_DRIVER_KEY || '' }}
         run: |
           set -uo pipefail
           ARGS=(-e CLAUDE_CODE_OAUTH_TOKEN)
           MCP=()
-          if [ "${ARM}" = treatment ]; then ARGS+=(-e BENCH_DRIVER_KEY); MCP=(--mcp-config /tmp/mcp.json); fi
+          if [ "${ARM}" = treatment ]; then CAPSID_RUN_KEY=$(cat "${RUNNER_TEMP}/run-key"); export CAPSID_RUN_KEY; ARGS+=(-e CAPSID_RUN_KEY); MCP=(--mcp-config /tmp/mcp.json); fi
           timeout "${PHASE1_MINUTES}m" docker exec "${ARGS[@]}" -w /testbed task \
             claude -p "$(cat "${RUNNER_TEMP}/first.md")" \
               --append-system-prompt "$(cat "${RUNNER_TEMP}/system.md")" "${MCP[@]+"${MCP[@]}"}" \
@@ -265,7 +275,6 @@ jobs:
         if: inputs.arm == 'baseline' || inputs.arm == 'treatment'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          BENCH_DRIVER_KEY: ${{ inputs.arm == 'treatment' && secrets.BENCH_DRIVER_KEY || '' }}
           SESSION: ${{ steps.turn1.outputs.session }}
           BASE: ${{ steps.ready.outputs.base }}
         run: |
@@ -273,10 +282,10 @@ jobs:
           if [ -f "${RUNNER_TEMP}/timed-out" ]; then echo "phase one ran out of time, so the verifier message is not delivered"; exit 0; fi
           if [ -f "${RUNNER_TEMP}/stopped-on-error" ]; then echo "phase one stopped with an error during execution, so the verifier message is not delivered"; exit 0; fi
           if [ -z "${SESSION}" ]; then echo "phase one left no session to resume"; exit 0; fi
-          # The verifier's time is outside both phase clocks. The secrets are in this
+          # The verifier's time is outside both phase clocks. The OAuth token is in this
           # step's env only for the docker exec below; the scorer that runs agent code
-          # starts with them removed.
-          env -u CLAUDE_CODE_OAUTH_TOKEN -u BENCH_DRIVER_KEY PATH="${RUNNER_TEMP}/venv/bin:${PATH}" \
+          # starts with it removed, and the run key is read only after it.
+          env -u CLAUDE_CODE_OAUTH_TOKEN PATH="${RUNNER_TEMP}/venv/bin:${PATH}" \
             node scripts/score.mjs "tasks/${TASK_ID}.json" "${RUNNER_TEMP}/diff.patch" "${RUNNER_TEMP}/verify.json"
           node scripts/verifier-message.mjs "${RUNNER_TEMP}/verify.json" > "${RUNNER_TEMP}/verifier.md"
           # The delivery mark: the claim file as it stood when the verifier message went
@@ -284,7 +293,7 @@ jobs:
           scripts/copy-claims.sh "${RUNNER_TEMP}/claims-delivered.jsonl" || { echo "could not mark delivery"; exit 0; }
           ARGS=(-e CLAUDE_CODE_OAUTH_TOKEN)
           MCP=()
-          if [ "${ARM}" = treatment ]; then ARGS+=(-e BENCH_DRIVER_KEY); MCP=(--mcp-config /tmp/mcp.json); fi
+          if [ "${ARM}" = treatment ]; then CAPSID_RUN_KEY=$(cat "${RUNNER_TEMP}/run-key"); export CAPSID_RUN_KEY; ARGS+=(-e CAPSID_RUN_KEY); MCP=(--mcp-config /tmp/mcp.json); fi
           timeout "${PHASE2_MINUTES}m" docker exec "${ARGS[@]}" -w /testbed task \
             claude -p "$(cat "${RUNNER_TEMP}/verifier.md")" --resume "${SESSION}" \
               --append-system-prompt "$(cat "${RUNNER_TEMP}/system.md")" "${MCP[@]+"${MCP[@]}"}" \
@@ -309,17 +318,6 @@ jobs:
           node scripts/read-claims.mjs "${RUNNER_TEMP}/claims-final.jsonl" "${RUNNER_TEMP}/claims-delivered.jsonl" > "${RUNNER_TEMP}/claim.json"
           cat "${RUNNER_TEMP}/claim.json"
           echo "claim=$(node -p 'require(process.argv[1]).claimed_done' "${RUNNER_TEMP}/claim.json")" >> "$GITHUB_OUTPUT"
-
-      - name: Close the treatment's job
-        if: always() && steps.job.outputs.job_id != ''
-        env:
-          BENCH_DRIVER_KEY: ${{ secrets.BENCH_DRIVER_KEY }}
-          JOB_ID: ${{ steps.job.outputs.job_id }}
-        run: |
-          set -uo pipefail
-          # After the agent has exited and the claim file is copied, so the close cannot
-          # touch the claim. The job's status is not an outcome (protocol section 3).
-          node scripts/post-job.mjs --close "${JOB_ID}" || echo "::warning::the treatment job ${JOB_ID} is still open; the seat fails it by hand"
 
       - name: Show the egress log
         if: always()
