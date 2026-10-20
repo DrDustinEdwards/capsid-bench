@@ -75,6 +75,11 @@ def main():
     rows = con.sql(f"SELECT {split} AS split, {select} FROM {source} WHERE CAST(created_at AS VARCHAR) > '{CUTOFF}'").fetchall()
     names = ["split", *wanted]
     total = con.sql(f"SELECT count(*) FROM {source}").fetchone()[0]
+    # The newest issue per split, so an empty frame can be told apart from a dataset that
+    # simply ends before the cutoff.
+    for name, n, newest in con.sql(f"SELECT {split}, count(*), max(CAST(created_at AS VARCHAR)) FROM {source} GROUP BY 1 ORDER BY 1").fetchall():
+        print(f"- split {name}: {n} rows, newest issue {newest}")
+    print()
 
     steps = ["after the cutoff", "has a FAIL_TO_PASS test", "not the author's repo", "changes tests", "Python or JS/TS fix", "at most 3 non-test files", "permissive licence"]
     kept = {s: 0 for s in steps}
