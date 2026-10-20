@@ -31,7 +31,7 @@ A run Capsid cannot judge (the machine failed, a hidden test did not run, Claude
 
 ## Tasks
 
-`tasks/<task_id>.json`, one file per task; the format is in [tasks/README.md](tasks/README.md). `bench-load.yml` writes benchmark tasks from Hugging Face and registers them with Capsid, which then refuses any change to them.
+`tasks/<task_id>.json`, one file per task; the format is in [tasks/README.md](tasks/README.md). `bench-load.yml` writes benchmark tasks from Hugging Face and registers them with Capsid, which then refuses any change to them. `bench-frame.yml` makes the frame's mechanical first cut (`scripts/frame.py`): every instance opened after the cutoff that passes the frame's filters, with the count each filter kept, uploaded as an artifact. It reads Hugging Face only.
 
 ## Analysis
 
