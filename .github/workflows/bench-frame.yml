@@ -1,0 +1,40 @@
+name: bench-frame
+
+# The candidate frame's mechanical first cut (scripts/frame.py; protocol section 4,
+# "Frame"): every instance opened after the cutoff that passes the frame's filters, with
+# the count each filter kept. Reads Hugging Face only: registers nothing, starts no run,
+# calls no model. The candidates are uploaded as the frame-candidates artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: Hugging Face dataset
+        default: nebius/SWE-rebench
+
+permissions:
+  contents: read
+
+jobs:
+  frame:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Filter the dataset
+        env:
+          DATASET: ${{ inputs.dataset }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet duckdb==1.2.2
+          python3 scripts/frame.py "${DATASET}" "${RUNNER_TEMP}/frame-candidates.json" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the candidates
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frame-candidates
+          retention-days: 90
+          path: ${{ runner.temp }}/frame-candidates.json
