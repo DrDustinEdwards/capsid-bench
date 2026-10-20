@@ -1,0 +1,98 @@
+name: bench-candidates
+
+# The frame (protocol section 4, "Frame"): the repository list from a SWE-rebench-format
+# dataset at one recorded commit (scripts/repos.py), then the candidate list searched on
+# GitHub over the eligible repositories (scripts/candidates.mjs). Reads Hugging Face and
+# GitHub only: registers nothing, starts no run, calls no model. Both files are uploaded
+# as the frame-repos and frame-candidates-list artifacts. The candidate list is produced
+# once; a rerun after a fix keeps the same freeze date.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: Hugging Face dataset
+        default: nebius/SWE-rebench
+      commit:
+        description: Dataset commit (empty for the current head, which is then recorded)
+        default: ""
+      freeze:
+        description: Freeze date, YYYY-MM-DD (UTC), no later than today
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  repos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Fetch the dataset at one commit and list its repositories
+        env:
+          DATASET: ${{ inputs.dataset }}
+          COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet duckdb==1.4.4
+          API="https://huggingface.co/api/datasets/${DATASET}"
+          if [ -z "${COMMIT}" ]; then
+            COMMIT="$(curl -fsS --retry 5 --retry-all-errors "${API}" | jq -r .sha)"
+          fi
+          [[ "${COMMIT}" =~ ^[0-9a-f]{40}$ ]] || { echo "not a commit: ${COMMIT}" >&2; exit 1; }
+          # The dataset's own parquet files at that commit, not Hugging Face's converted
+          # copy, so the commit alone names the bytes read.
+          curl -fsS --retry 5 --retry-all-errors "${API}/tree/${COMMIT}?recursive=true" > "${RUNNER_TEMP}/tree.json"
+          D="${RUNNER_TEMP}/data"
+          jq -r '.[] | select(.type == "file" and (.path | endswith(".parquet"))) | .path' "${RUNNER_TEMP}/tree.json" > "${RUNNER_TEMP}/files.txt"
+          [ -s "${RUNNER_TEMP}/files.txt" ] || { echo "no parquet files at ${COMMIT}" >&2; exit 1; }
+          while read -r path; do
+            mkdir -p "$(dirname "${D}/${path}")"
+            curl -fsSL --retry 6 --retry-all-errors --retry-delay 10 -o "${D}/${path}" "https://huggingface.co/datasets/${DATASET}/resolve/${COMMIT}/${path}"
+            sleep 1
+          done < "${RUNNER_TEMP}/files.txt"
+          (cd "${D}" && sha256sum $(cat "${RUNNER_TEMP}/files.txt")) |
+            jq -R -s --arg dataset "${DATASET}" --arg commit "${COMMIT}" \
+              '{dataset: $dataset, commit: $commit, files: [split("\n")[] | select(length > 0) | capture("^(?<sha256>[0-9a-f]+)  (?<path>.+)$")]}' > "${RUNNER_TEMP}/manifest.json"
+          python3 scripts/repos.py "${D}" "${RUNNER_TEMP}/manifest.json" "${RUNNER_TEMP}/repos.json" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frame-repos
+          retention-days: 90
+          path: ${{ runner.temp }}/repos.json
+
+  candidates:
+    needs: repos
+    runs-on: ubuntu-latest
+    # The search waits out GitHub's hourly limit rather than fail.
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frame-repos
+          path: ${{ runner.temp }}
+
+      - name: Search GitHub for the candidates
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          FREEZE: ${{ inputs.freeze }}
+        run: node scripts/candidates.mjs --repos "${RUNNER_TEMP}/repos.json" --freeze "${FREEZE}" --out "${RUNNER_TEMP}/candidates.json" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frame-candidates-list
+          retention-days: 90
+          path: ${{ runner.temp }}/candidates.json
