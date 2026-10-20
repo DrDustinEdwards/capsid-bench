@@ -29,8 +29,18 @@ jobs:
           DATASET: ${{ inputs.dataset }}
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet duckdb==1.2.2
-          python3 scripts/frame.py "${DATASET}" "${RUNNER_TEMP}/frame-candidates.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 -m pip install --quiet duckdb==1.4.4
+          # Each parquet file is fetched once, with backoff, and read locally: reading over
+          # hf:// scans the files once per query and draws Hugging Face's 429.
+          D="${RUNNER_TEMP}/data"
+          curl -fsS --retry 5 --retry-all-errors "https://huggingface.co/api/datasets/${DATASET}/parquet" > "${RUNNER_TEMP}/parquet.json"
+          node -e 'for (const [c, splits] of Object.entries(require(process.argv[1]))) for (const [s, urls] of Object.entries(splits)) urls.forEach((u, i) => console.log(`${c}/${s}/${i}.parquet ${u}`))' "${RUNNER_TEMP}/parquet.json" |
+            while read -r path url; do
+              mkdir -p "$(dirname "${D}/${path}")"
+              curl -fsSL --retry 6 --retry-all-errors --retry-delay 10 -o "${D}/${path}" "${url}"
+              sleep 1
+            done
+          python3 scripts/frame.py "${D}" "${RUNNER_TEMP}/frame-candidates.json" "${DATASET}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the candidates
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
