@@ -1,0 +1,51 @@
+name: bench-frame-save
+
+# Copies one bench-candidates run's two lists (frame-repos, frame-candidates-list) onto a
+# branch, frame/<run id>, unchanged, so they can be read and hashed outside Actions and
+# merged into frame/ by pull request. Reads that run's artifacts only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: The bench-candidates run
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  save:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frame-repos
+          path: frame
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frame-candidates-list
+          path: frame
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Commit the lists to their own branch
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          [[ "${RUN_ID}" =~ ^[0-9]+$ ]] || { echo "not a run id" >&2; exit 1; }
+          (cd frame && sha256sum repos.json candidates.json | tee -a "$GITHUB_STEP_SUMMARY")
+          git config user.name "Dustin Edwards"
+          git config user.email "emaildustinedwards@gmail.com"
+          git checkout -b "frame/${RUN_ID}"
+          git add frame/repos.json frame/candidates.json
+          git commit -m "Frame lists from bench-candidates run ${RUN_ID}"
+          git push origin "frame/${RUN_ID}"
