@@ -31,7 +31,7 @@ A run Capsid cannot judge (the machine failed, a hidden test did not run, Claude
 
 ## Tasks
 
-`tasks/<task_id>.json`, one file per task; the format is in [tasks/README.md](tasks/README.md). `bench-load.yml` writes benchmark tasks from Hugging Face and registers them with Capsid, which then refuses any change to them. `bench-frame.yml` makes the frame's mechanical first cut (`scripts/frame.py`): every instance opened after the cutoff that passes the frame's filters, with the count each filter kept, uploaded as an artifact. It reads Hugging Face only.
+`tasks/<task_id>.json`, one file per task; the format is in [tasks/README.md](tasks/README.md). `bench-load.yml` writes benchmark tasks from Hugging Face and registers them with Capsid, which then refuses any change to them. `bench-candidates.yml` builds the frame (the protocol's section 4). `scripts/repos.py` lists every repository in nebius/SWE-rebench at one recorded commit, with the install recipe of its newest instance. `scripts/candidates.mjs` then checks each repository's language, licence and owner on GitHub and searches its merged pull requests, keeping those that close one issue opened after the cutoff, change tests and touch at most 3 other files. Both lists are uploaded as artifacts with every filter's count. It reads Hugging Face and GitHub only, and is run once, with a freeze date that a rerun keeps.
 
 ## Analysis
 
