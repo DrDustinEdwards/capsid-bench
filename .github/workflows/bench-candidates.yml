@@ -89,10 +89,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           FREEZE: ${{ inputs.freeze }}
-        run: node scripts/candidates.mjs --repos "${RUNNER_TEMP}/repos.json" --freeze "${FREEZE}" --out "${RUNNER_TEMP}/candidates.json" | tee -a "$GITHUB_STEP_SUMMARY"
+        # pipefail, so a failed search fails the step rather than passing through tee.
+        run: |
+          set -euo pipefail
+          node scripts/candidates.mjs --repos "${RUNNER_TEMP}/repos.json" --freeze "${FREEZE}" --out "${RUNNER_TEMP}/candidates.json" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: frame-candidates-list
           retention-days: 90
           path: ${{ runner.temp }}/candidates.json
+          if-no-files-found: error
