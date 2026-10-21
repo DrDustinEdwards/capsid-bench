@@ -24,7 +24,7 @@ A run Capsid cannot judge (the machine failed, a hidden test did not run, Claude
 
 ## Setup (once)
 
-- Secrets: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`, Dustin's subscription), `BENCH_KEY` (`node scripts/improve-derive-key.mjs --bench` in capsid), `BENCH_DRIVER_KEY` (a Capsid driver key for the `bench` namespace, no flags, narrowed to posting: tools `capsid_work_jobs` and `capsid_work_jobs.post`).
+- Secrets: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`, Dustin's subscription), `BENCH_KEY` (a fresh random value, set at the same time as Capsid's `BENCH_SECRET`; the commands are in capsid's docs/bench.md), `BENCH_DRIVER_KEY` (a Capsid driver key for the `bench` namespace, no flags, narrowed to posting: tools `capsid_work_jobs` and `capsid_work_jobs.post`).
 - Never set `ANTHROPIC_API_KEY` here: it would win over the token and bill the Console account. The run refuses to start if it is set.
 - Variables: `CLAUDE_CODE_VERSION` and `SWE_HARNESS_REF` (a commit of [SWE-rebench/SWE-bench-fork](https://github.com/SWE-rebench/SWE-bench-fork)), both fixed at pre-registration.
 - In Capsid: migrations 0047 and 0049 applied, the `bench` namespace created, and KV `bench:enabled` set to `on` only while runs are wanted.
