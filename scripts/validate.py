@@ -103,7 +103,7 @@ def main():
         result.update(verdict="recipe not usable at the base commit", detail=str(err)[:500])
     else:
         client = docker.from_env(timeout=600)
-        built, failed_builds = build_instance_images(client, [instance], max_workers=1)
+        built, failed_builds = build_instance_images(client, [instance], max_workers=1, tag="latest")
         if failed_builds or not built:
             result.update(verdict="build failed")
         else:
