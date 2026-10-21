@@ -11,7 +11,7 @@
 // off. The walk is strictly in order: no candidate is considered until the one before it
 // is recorded, including the author's audit decision.
 //
-//   node scripts/walk.mjs start --log log.jsonl --seed <registered seed> --n <registered N>
+//   node scripts/walk.mjs start --dir <walk dir> --beacon seed.json --n <registered N> --registration <sha256>
 //   node scripts/walk.mjs step --frame frame/candidates.json --repos frame/repos.json --dir <walk dir>
 //   node scripts/walk.mjs open-audits --dir <walk dir> --repo owner/name
 //   node scripts/walk.mjs record --dir <walk dir> --issue <n> --commenter <login> --body-file <f> \
@@ -215,21 +215,26 @@ async function main() {
   const [command, ...rest] = process.argv.slice(2);
   const { values } = parseArgs({
     args: rest,
-    options: Object.fromEntries(["frame", "repos", "dir", "seed", "n", "repo", "issue", "commenter", "body-file", "author", "second-reader"].map((k) => [k, { type: "string" }])),
+    options: Object.fromEntries(["frame", "repos", "dir", "beacon", "registration", "n", "repo", "issue", "commenter", "body-file", "author", "second-reader"].map((k) => [k, { type: "string" }])),
   });
   const dir = values.dir ?? ".";
   const logPath = join(dir, "log.jsonl");
   const log = readLog(logPath);
 
   if (command === "start") {
-    if (!values.seed || !/^[1-9]\d*$/.test(values.n ?? "")) throw new Error("start needs --seed and a positive --n");
+    // The seed is the verified drand round's randomness (scripts/seed.mjs), never typed in.
+    const beacon = JSON.parse(readFileSync(values.beacon, "utf8"));
+    if (!/^[0-9a-f]{64}$/.test(beacon.randomness ?? "") || !beacon.t) throw new Error("start needs the registered round from scripts/seed.mjs --t");
+    if (!/^[1-9]\d*$/.test(values.n ?? "") || !/^[0-9a-f]{64}$/.test(values.registration ?? "")) throw new Error("start needs a positive --n and the registration's --registration sha256");
+    const record = { event: "start", seed: beacon.randomness, n: Number(values.n), cap: REPO_CAP, frame_sha256: FRAME_SHA256, registration_sha256: values.registration, beacon };
     if (log.length) {
-      if (log[0].seed !== values.seed || log[0].n !== Number(values.n)) throw new Error("the walk has already started with another seed or N");
+      const same = ["seed", "n", "registration_sha256"].every((k) => log[0][k] === record[k]);
+      if (!same) throw new Error("the walk has already started with another seed, N or registration");
       return console.log(JSON.stringify({ action: "started", seed: log[0].seed, n: log[0].n }));
     }
     mkdirSync(dir, { recursive: true });
-    append(dir, { event: "start", seed: values.seed, n: Number(values.n), cap: REPO_CAP, frame_sha256: FRAME_SHA256 });
-    return console.log(JSON.stringify({ action: "started", seed: values.seed, n: Number(values.n) }));
+    append(dir, record);
+    return console.log(JSON.stringify({ action: "started", seed: record.seed, n: record.n, round: beacon.round }));
   }
 
   if (command === "step" || command === "status") {
