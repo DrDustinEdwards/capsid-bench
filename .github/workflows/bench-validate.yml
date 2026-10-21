@@ -1,0 +1,85 @@
+name: bench-validate
+
+# A harness check of scripts/validate.py on SWE-rebench instances from before the
+# cutoff, which are outside the frame: each instance is rebuilt from its recipe with the
+# SWE-rebench harness and validated with three offline reruns a side, and the two test
+# lists it finds are printed beside the dataset's own. Touches no frame candidate,
+# registers nothing, starts no run, calls no model.
+
+on:
+  workflow_dispatch:
+    inputs:
+      instances:
+        description: SWE-rebench instance ids, space-separated
+        required: true
+      commit:
+        description: Dataset commit
+        default: 89cdfbab4ab1bd8f5a658bb212d1b63624f4f881
+
+permissions:
+  contents: read
+
+env:
+  # SWE-rebench/SWE-bench-fork, the harness the dataset's recipes are written for.
+  HARNESS: git+https://github.com/SWE-rebench/SWE-bench-fork@e4907b7a90eafaa1f0a6428fd04fe31cdd8b4284
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install the harness
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet duckdb==1.4.4 "swebench @ ${HARNESS}"
+
+      - name: Fetch the instances at the recorded commit
+        env:
+          COMMIT: ${{ inputs.commit }}
+          IDS: ${{ inputs.instances }}
+        run: |
+          set -euo pipefail
+          [[ "${COMMIT}" =~ ^[0-9a-f]{40}$ ]] || { echo "not a commit" >&2; exit 1; }
+          API="https://huggingface.co/api/datasets/nebius/SWE-rebench"
+          curl -fsS --retry 5 --retry-all-errors "${API}/tree/${COMMIT}?recursive=true" |
+            jq -r '.[] | select(.type == "file" and (.path | endswith(".parquet"))) | .path' > "${RUNNER_TEMP}/files.txt"
+          D="${RUNNER_TEMP}/data"
+          while read -r path; do
+            mkdir -p "$(dirname "${D}/${path}")"
+            curl -fsSL --retry 6 --retry-all-errors --retry-delay 10 -o "${D}/${path}" "https://huggingface.co/datasets/nebius/SWE-rebench/resolve/${COMMIT}/${path}"
+          done < "${RUNNER_TEMP}/files.txt"
+          mkdir -p "${RUNNER_TEMP}/instances"
+          python3 - "${D}" "${RUNNER_TEMP}/instances" ${IDS} <<'PY'
+          import json, sys, duckdb
+          d, out, ids = sys.argv[1], sys.argv[2], sys.argv[3:]
+          rows = duckdb.sql(f"SELECT * FROM read_parquet('{d}/**/*.parquet', union_by_name=true)").df()
+          for i in ids:
+              row = rows[rows.instance_id == i]
+              if row.empty:
+                  sys.exit(f"{i} is not in the dataset")
+              r = json.loads(row.iloc[0].to_json(default_handler=str))
+              keep = {k: r.get(k) for k in ("instance_id", "repo", "base_commit", "patch", "test_patch", "problem_statement", "created_at", "install_config")}
+              keep["version"] = r.get("version") or "0"
+              keep["expected"] = {"FAIL_TO_PASS": r["FAIL_TO_PASS"], "PASS_TO_PASS": r["PASS_TO_PASS"]}
+              keep["FAIL_TO_PASS"], keep["PASS_TO_PASS"] = [], []
+              json.dump(keep, open(f"{out}/{i}.json", "w"))
+          PY
+
+      - name: Validate each and compare with the dataset
+        run: |
+          set -euo pipefail
+          for f in "${RUNNER_TEMP}"/instances/*.json; do
+            python3 scripts/validate.py "$f" "${f%.json}.result.json" | tee -a "$GITHUB_STEP_SUMMARY"
+            python3 - "$f" "${f%.json}.result.json" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json, sys
+          inst, res = json.load(open(sys.argv[1])), json.load(open(sys.argv[2]))
+          as_list = lambda v: json.loads(v) if isinstance(v, str) else (v or [])
+          for key in ("FAIL_TO_PASS", "PASS_TO_PASS"):
+              mine, theirs = set(res.get(key, [])), set(as_list(inst["expected"][key]))
+              print(f"- {key}: found {len(mine)}, dataset {len(theirs)}, both {len(mine & theirs)}")
+          PY
+          done

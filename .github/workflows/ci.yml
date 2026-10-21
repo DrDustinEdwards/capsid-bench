@@ -24,6 +24,9 @@ jobs:
       - name: Test the scripts
         run: node --test test/
 
+      - name: Test the validation verdict
+        run: python3 -m unittest discover -s test -p 'test_*.py'
+
       - name: Check every task file
         run: |
           set -euo pipefail
