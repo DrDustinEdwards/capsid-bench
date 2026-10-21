@@ -1,0 +1,81 @@
+name: bench-audit
+
+# Records a reader's audit decision (protocol section 4, "Audit") from a comment on an
+# audit issue that bench-walk.yml opened, then carries the walk on. Only the issue's
+# reader counts: the repository owner for the author's audits, the SECOND_READER variable
+# for the second reader's. The first valid comment is recorded on the `walk` branch and
+# closes the issue; a malformed one gets a reply and is not recorded.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    if: github.event.issue.pull_request == null && github.event.issue.state == 'open'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+    concurrency:
+      group: bench-walk
+      cancel-in-progress: false
+    outputs:
+      recorded: ${{ steps.record.outputs.recorded }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: main
+          path: walk-state
+          fetch-depth: 0
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Record the decision
+        id: record
+        env:
+          BODY: ${{ github.event.comment.body }}
+          ISSUE: ${{ github.event.issue.number }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          AUTHOR: ${{ github.repository_owner }}
+          SECOND_READER: ${{ vars.SECOND_READER }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cd walk-state
+          git ls-remote --exit-code --heads origin walk > /dev/null || { echo "recorded=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          git fetch -q origin walk && git checkout -q -B walk origin/walk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          printf '%s' "${BODY}" > "${RUNNER_TEMP}/comment.txt"
+          out="$(node ../scripts/walk.mjs record --dir . --issue "${ISSUE}" --commenter "${COMMENTER}" --body-file "${RUNNER_TEMP}/comment.txt" --author "${AUTHOR}" --second-reader "${SECOND_READER}")"
+          echo "${out}"
+          recorded="$(echo "${out}" | jq -r .recorded)"
+          echo "recorded=${recorded}" >> "$GITHUB_OUTPUT"
+          if [ "${recorded}" = "true" ]; then
+            git add log.jsonl && git commit -qm "walk: audit recorded from #${ISSUE}" && git push -q origin walk
+            gh issue close "${ISSUE}" --repo "${REPO}" --comment "Recorded: $(echo "${out}" | jq -r '[.decision, .reason // empty] | join(" ")')."
+          elif [ "$(echo "${out}" | jq -r '.reply // false')" = "true" ]; then
+            gh issue comment "${ISSUE}" --repo "${REPO}" --body 'Not recorded. Write `in`, or `out <code>` followed by the quoted reason, with a code from the list above.'
+          fi
+
+  walk:
+    needs: record
+    if: needs.record.outputs.recorded == 'true'
+    permissions:
+      actions: write
+      contents: write
+      issues: write
+    uses: ./.github/workflows/bench-walk.yml

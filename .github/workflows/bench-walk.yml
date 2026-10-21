@@ -1,0 +1,116 @@
+name: bench-walk
+
+# The walk (protocol section 4, "Audit" and "Draw"; scripts/walk.mjs). Steps through the
+# frozen frame in the registered seed's order, one candidate at a time, until a candidate
+# needs an audit, the walk is done, or the time budget runs out, then opens one issue per
+# audit due. The log and the instances that passed both gates live on the `walk` branch,
+# committed after every step. Started by hand once with the registered seed and N, and
+# again by bench-audit.yml after each recorded audit. Calls no model and starts no run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: The registered seed (first start only; must match the log after that)
+        default: ""
+      n:
+        description: The registered N (first start only)
+        default: ""
+  workflow_call:
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+
+env:
+  # SWE-rebench/SWE-bench-fork, the harness the dataset's recipes are written for.
+  HARNESS: git+https://github.com/SWE-rebench/SWE-bench-fork@e4907b7a90eafaa1f0a6428fd04fe31cdd8b4284
+
+jobs:
+  walk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    concurrency:
+      group: bench-walk
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: main
+          path: walk-state
+          fetch-depth: 0
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Check out the walk's log
+        working-directory: walk-state
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin walk > /dev/null; then
+            git fetch -q origin walk && git checkout -q -B walk origin/walk
+          else
+            git checkout -q --orphan walk && git rm -rfq .
+          fi
+
+      - name: Start, or check the start against the log
+        if: inputs.seed != ''
+        env:
+          SEED: ${{ inputs.seed }}
+          N: ${{ inputs.n }}
+        run: |
+          set -euo pipefail
+          node scripts/walk.mjs start --dir walk-state --seed "${SEED}" --n "${N}"
+          cd walk-state && git add -A && { git diff --cached --quiet || { git commit -qm "walk: start" && git push -q origin walk; }; }
+
+      - name: Install the harness
+        run: |
+          set -euo pipefail
+          [ -s walk-state/log.jsonl ] || { echo "the walk has not started: dispatch with the registered seed and N" >&2; exit 1; }
+          python3 -m pip install --quiet "swebench @ ${HARNESS}"
+
+      - name: Walk
+        id: walk
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Start no candidate with less than 90 minutes of the job left.
+          budget=$(( (350 - 90 - 10) * 60 ))
+          while [ "${SECONDS}" -lt "${budget}" ]; do
+            out="$(node scripts/walk.mjs step --frame frame/candidates.json --repos frame/repos.json --dir walk-state | tail -1)"
+            echo "${out}" | tee -a "$GITHUB_STEP_SUMMARY"
+            (cd walk-state && git add -A && git diff --cached --quiet || { git commit -qm "walk: $(echo "${out}" | jq -r '[.action, .position // empty, .task_id // empty] | join(" ")')" && git push -q origin walk; })
+            docker system prune -af --volumes > /dev/null
+            last="$(echo "${out}" | jq -r .action)"
+            case "${last}" in
+              wait|done) break ;;
+            esac
+          done
+          echo "last=${last:-none}" >> "$GITHUB_OUTPUT"
+
+      - name: Open the audits that are due
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          node scripts/walk.mjs open-audits --frame frame/candidates.json --dir walk-state --repo "${REPO}" | tee -a "$GITHUB_STEP_SUMMARY"
+          cd walk-state && git add log.jsonl && { git diff --cached --quiet || { git commit -qm "walk: audits opened" && git push -q origin walk; }; }
+          node ../scripts/walk.mjs status --frame ../frame/candidates.json --dir . | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Carry on in a fresh job when the time budget ran out mid-walk
+        if: steps.walk.outputs.last != 'wait' && steps.walk.outputs.last != 'done'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: gh workflow run bench-walk.yml --repo "${REPO}" --ref main
