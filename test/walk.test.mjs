@@ -104,3 +104,13 @@ test("audit text is fenced so nothing in it renders or links", () => {
   assert.equal(fenced("a ``` b"), "````\na ``` b\n````");
   assert.equal(fenced("@someone #12"), "```\n@someone #12\n```");
 });
+
+test("the seed's round is the quicknet round produced at T, or the last one before it", async () => {
+  const { roundAt, roundTime, roundMessage } = await import("../scripts/seed.mjs");
+  assert.equal(roundAt("2023-08-23T15:09:27Z"), 1);
+  assert.equal(roundAt("2023-08-23T15:09:29Z"), 1);
+  assert.equal(roundAt("2023-08-23T15:09:30Z"), 2);
+  assert.equal(roundTime(roundAt("2026-11-01T00:00:00Z")) <= Date.parse("2026-11-01T00:00:00Z") / 1000, true);
+  assert.throws(() => roundAt("2026-11-01 00:00"));
+  assert.equal(roundMessage(1).toString("hex"), "cd2662154e6d76b2b2b92e70c0cac3ccf534f9b74eb5b89819ec509083d00a50");
+});
