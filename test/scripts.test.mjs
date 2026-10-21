@@ -221,7 +221,7 @@ test("the analysis stays sealed until the registered N, then gives the paired di
   let clock = Date.parse("2026-11-01T00:00:00Z");
   for (let i = 1; i <= 6; i++) {
     const task_id = `sample__repo-${i}`;
-    tasks.push({ task_id, split: "full", fail_to_pass_count: 1, pass_to_pass_count: 1 });
+    tasks.push({ task_id, repo: `sample/repo-${Math.ceil(i / 2)}`, split: "full", fail_to_pass_count: 1, pass_to_pass_count: 1 });
     draw.push({ position: i, task_id });
     for (const arm of ["baseline", "treatment"]) {
       for (let k = 0; k < 3; k++) {
@@ -245,4 +245,37 @@ test("the analysis stays sealed until the registered N, then gives the paired di
   assert.match(allowedSentence(100, open.primary.b, open.primary.resolution), /no confirmatory test/);
   assert.match(allowedSentence(400, { high: -0.01 }, { low: -0.06 }), /not met/);
   assert.equal(pilot({ tasks, runs }).tasks, 0);
+  // Three repositories, each at the cap, reported beside N.
+  assert.equal(open.counts.repositories, 3);
+  assert.equal(open.counts.max_tasks_per_repository, 2);
+  assert.deepEqual(open.counts.at_cap, ["sample/repo-1", "sample/repo-2", "sample/repo-3"]);
+  assert.equal(open.primary.b.repositories, 3);
+  assert.equal(open.sensitivity.by_repository.b.estimate, -1);
+  // A draw with a third task from one repository is refused before anything is computed.
+  const over = [...tasks, { task_id: "sample__repo-7", repo: "sample/repo-1", split: "full", fail_to_pass_count: 1, pass_to_pass_count: 1 }];
+  assert.throws(() => analyze({ tasks: over, draw: [...draw, { position: 7, task_id: "sample__repo-7" }], runs }, { n: 6, frameSize: 200, resamples: 200 }), /more than 2 tasks from sample\/repo-1/);
+});
+
+test("the bootstrap resamples repositories, keeping every difference from a drawn one", async () => {
+  const { bootstrap, rng } = await import("../scripts/analyze.mjs");
+  const items = [
+    { repo: "a/one", value: 1 },
+    { repo: "a/one", value: 1 },
+    { repo: "b/two", value: 0 },
+  ];
+  // Primary: the unweighted mean of all differences. Sensitivity: the mean of repository means.
+  const primary = bootstrap(items, 500, rng("s"));
+  assert.equal(primary.estimate, 2 / 3);
+  assert.equal(primary.repositories, 2);
+  assert.equal(primary.tasks, 3);
+  assert.equal(bootstrap(items, 500, rng("s"), { byRepository: true }).estimate, 0.5);
+  // A repository's two differences are drawn together, so every resampled mean is 0, 2/3
+  // or 1, never the 1/3 a task-level bootstrap can draw.
+  const values = new Set();
+  const random = rng("t");
+  for (let i = 0; i < 50; i++) {
+    const r = bootstrap(items, 1, random);
+    values.add(r.low);
+  }
+  for (const v of values) assert.ok([0, 2 / 3, 1].some((x) => Math.abs(x - v) < 1e-12), String(v));
 });
