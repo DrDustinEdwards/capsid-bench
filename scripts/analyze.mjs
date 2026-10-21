@@ -116,25 +116,56 @@ export function rng(seed) {
   };
 }
 
-// The cluster bootstrap: resample tasks with replacement, keeping a task's arms together,
-// and take the two-sided 95% percentile interval of the mean within-task difference.
-export function bootstrap(diffs, resamples, random) {
-  const estimate = mean(diffs);
+// The cluster bootstrap over repositories (section 6, "Interval", decided 2026-10-21):
+// resample with replacement the repositories that contributed at least one value, keep
+// every value from each drawn repository, and recompute the statistic. Two-sided 95%
+// percentile interval. Each item is { repo, value }; a task's arms are already one value.
+//
+// By default the statistic is the unweighted mean of all kept values (the primary). With
+// byRepository it is the unweighted mean of the per-repository means (the sensitivity).
+export function bootstrap(items, resamples, random, { byRepository = false } = {}) {
+  const groups = new Map();
+  for (const { repo, value } of items) groups.set(repo, [...(groups.get(repo) ?? []), value]);
+  const clusters = [...groups.values()];
+  const statistic = (picked) => (byRepository ? mean(picked.map(mean)) : mean(picked.flat()));
+  const estimate = statistic(clusters);
   const stats = new Float64Array(resamples);
   for (let r = 0; r < resamples; r++) {
-    let s = 0;
-    for (let i = 0; i < diffs.length; i++) s += diffs[Math.floor(random() * diffs.length)];
-    stats[r] = s / diffs.length;
+    const picked = [];
+    for (let i = 0; i < clusters.length; i++) picked.push(clusters[Math.floor(random() * clusters.length)]);
+    stats[r] = statistic(picked);
   }
   stats.sort();
   const at = (q) => stats[Math.min(resamples - 1, Math.max(0, Math.floor(q * resamples)))];
-  return { estimate, low: at(0.025), high: at(0.975), tasks: diffs.length };
+  return { estimate, low: at(0.025), high: at(0.975), tasks: items.length, repositories: clusters.length };
+}
+
+// The repository cap (section 4, "Draw"): at most 2 accepted tasks from one repository.
+export const REPO_CAP = 2;
+
+// The repositories behind the drawn tasks, as the paper reports them beside N: their
+// number, the most tasks from one, and every repository at the cap. A draw over the cap
+// is refused, since the estimand allows no repository more than 2 differences.
+export function repositories(drawn, tasks) {
+  const count = new Map();
+  for (const id of drawn) {
+    const repo = tasks.get(id)?.repo;
+    if (!repo) throw new Error(`drawn task ${id} has no repository`);
+    count.set(repo, (count.get(repo) ?? 0) + 1);
+  }
+  const over = [...count].filter(([, n]) => n > REPO_CAP).map(([repo]) => repo);
+  if (over.length) throw new Error(`the draw has more than ${REPO_CAP} tasks from ${over.join(", ")}`);
+  return {
+    repositories: count.size,
+    max_tasks_per_repository: Math.max(0, ...count.values()),
+    at_cap: [...count].filter(([, n]) => n === REPO_CAP).map(([repo]) => repo).sort(),
+  };
 }
 
 // Per task, each arm's scored-run rate of one label; the difference is treatment minus
 // baseline. Tasks without a scored run on both arms are not included.
 function differences(perTask, key) {
-  return perTask.filter((t) => t.baseline.length > 0 && t.treatment.length > 0).map((t) => mean(t.treatment.map((l) => l[key])) - mean(t.baseline.map((l) => l[key])));
+  return perTask.filter((t) => t.baseline.length > 0 && t.treatment.length > 0).map((t) => ({ repo: t.repo, value: mean(t.treatment.map((l) => l[key])) - mean(t.baseline.map((l) => l[key])) }));
 }
 
 // The pre-specified bounds: every slot with no scored run, on every task with a model
@@ -147,7 +178,7 @@ function bounded(perTask, key, againstTreatment) {
   const fillB = againstTreatment ? goodB : 1 - goodB;
   return perTask.map((t) => {
     const arm = (scored, missing, fill) => mean([...scored.map((l) => l[key]), ...Array(missing).fill(fill)]);
-    return arm(t.treatment, t.missing.treatment, fillT) - arm(t.baseline, t.missing.baseline, fillB);
+    return { repo: t.repo, value: arm(t.treatment, t.missing.treatment, fillT) - arm(t.baseline, t.missing.baseline, fillB) };
   });
 }
 
@@ -170,6 +201,7 @@ export function allowedSentence(frameSize, b, resolution) {
 export function analyze(data, { n, frameSize, seed = "capsid-bench", resamples = 10000, flagged = [] }) {
   const tasks = new Map(data.tasks.map((t) => [t.task_id, t]));
   const drawn = [...data.draw].sort((x, y) => x.position - y.position).map((d) => d.task_id);
+  const repos = repositories(drawn, tasks);
   const outage = outageHours(data.runs);
   const byTaskArm = new Map();
   for (const run of [...data.runs].sort((x, y) => (x.started_at < y.started_at ? -1 : x.started_at > y.started_at ? 1 : 0))) {
@@ -179,7 +211,7 @@ export function analyze(data, { n, frameSize, seed = "capsid-bench", resamples =
   }
   const started = drawn.filter((id) => MODEL_ARMS.some((arm) => byTaskArm.has(`${id}\u0000${arm}`)));
   const perTask = started.map((id) => {
-    const row = { task_id: id, missing: {}, finished: true };
+    const row = { task_id: id, repo: tasks.get(id).repo, missing: {}, finished: true };
     for (const arm of MODEL_ARMS) {
       const s = slots(byTaskArm.get(`${id}\u0000${arm}`) ?? [], outage);
       if (s.length < SLOTS || s.includes("open")) row.finished = false;
@@ -191,7 +223,7 @@ export function analyze(data, { n, frameSize, seed = "capsid-bench", resamples =
   });
   const included = perTask.filter((t) => t.baseline.length > 0 && t.treatment.length > 0);
   const exhausted = drawn.length > 0 && drawn.every((id) => perTask.find((t) => t.task_id === id)?.finished);
-  const counts = { drawn: drawn.length, started: started.length, included: included.length, runs: data.runs.filter((r) => MODEL_ARMS.includes(r.arm)).length, outage_hours: outage.size };
+  const counts = { drawn: drawn.length, started: started.length, included: included.length, runs: data.runs.filter((r) => MODEL_ARMS.includes(r.arm)).length, outage_hours: outage.size, ...repos };
   if (!(included.length >= n || exhausted)) return { sealed: true, counts, why: `${included.length} of the registered ${n} tasks included and the frame is not exhausted` };
 
   const random = rng(seed);
@@ -214,7 +246,7 @@ export function analyze(data, { n, frameSize, seed = "capsid-bench", resamples =
     const per = rows.map((t) => {
       const runsOf = (arm) => (byTaskArm.get(`${t.task_id}\u0000${arm}`) ?? []).filter((r) => analysisStatus(r, outage) === "scored" && Number.isFinite(r[field]));
       const [rb, rt] = [runsOf("baseline"), runsOf("treatment")];
-      return rb.length && rt.length ? mean(rt.map((r) => r[field])) - mean(rb.map((r) => r[field])) : null;
+      return rb.length && rt.length ? { repo: t.repo, value: mean(rt.map((r) => r[field])) - mean(rb.map((r) => r[field])) } : null;
     }).filter((x) => x !== null);
     return per.length ? bootstrap(per, resamples, random) : null;
   };
@@ -224,6 +256,8 @@ export function analyze(data, { n, frameSize, seed = "capsid-bench", resamples =
     primary: { b, resolution },
     sentence: allowedSentence(frameSize, b, resolution),
     sensitivity: {
+      // The unweighted mean of the within-repository mean differences, same bootstrap.
+      by_repository: { b: bootstrap(differences(perTask, "b"), resamples, random, { byRepository: true }), resolution: bootstrap(differences(perTask, "resolved"), resamples, random, { byRepository: true }) },
       b: { against_treatment: bootstrap(bounded(perTask, "b", true), resamples, random), for_treatment: bootstrap(bounded(perTask, "b", false), resamples, random) },
       resolution: { against_treatment: bootstrap(bounded(perTask, "resolved", true), resamples, random), for_treatment: bootstrap(bounded(perTask, "resolved", false), resamples, random) },
       flagged_out: flaggedSet.size ? { b: interval("b", withoutFlagged), resolution: interval("resolved", withoutFlagged) } : null,
@@ -244,7 +278,8 @@ export function pilot(data, { seed = "capsid-bench-pilot", resamples = 10000 } =
     if (run.arm !== "baseline" || tasks.get(run.task_id)?.split !== "pilot" || analysisStatus(run, outage) !== "scored") continue;
     rates.set(run.task_id, [...(rates.get(run.task_id) ?? []), labels(run, tasks.get(run.task_id)).b]);
   }
-  const perTask = [...rates.values()].map(mean);
+  // The pilot's bound is over tasks: each task is its own cluster.
+  const perTask = [...rates].map(([id, values]) => ({ repo: id, value: mean(values) }));
   if (perTask.length === 0) return { tasks: 0, may_stop: false };
   const ci = bootstrap(perTask, resamples, rng(seed));
   return { tasks: perTask.length, baseline_b: ci, may_stop: ci.high < 0.1 };
