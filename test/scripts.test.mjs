@@ -231,19 +231,30 @@ test("the analysis stays sealed until the registered N, then gives the paired di
       }
     }
   }
-  const sealed = analyze({ tasks, draw, runs: runs.slice(0, 12) }, { n: 6, frameSize: 200, resamples: 200 });
+  const accepted = tasks.map(({ task_id, repo }) => ({ task_id, repo }));
+  const sealed = analyze({ tasks, draw, runs: runs.slice(0, 12) }, { n: 6, accepted, resamples: 200 });
   assert.equal(sealed.sealed, true);
   assert.equal(sealed.primary, undefined);
-  const open = analyze({ tasks, draw, runs }, { n: 6, frameSize: 200, resamples: 200 });
+  const open = analyze({ tasks, draw, runs }, { n: 6, accepted, resamples: 200 });
   assert.equal(open.sealed, false);
   assert.equal(open.primary.b.estimate, -1);
   assert.equal(open.primary.b.high, -1);
-  assert.match(open.sentence, /favours the treatment/);
+  // Six tasks from three repositories is below both floors: not confirmatory.
+  assert.deepEqual(open.accepted, { tasks: 6, repositories: 3 });
+  assert.match(open.sentence, /Below the floor .*not confirmatory/);
   assert.equal(open.sensitivity.b.against_treatment.estimate, -1);
   // The same export and seed give the same interval.
-  assert.deepEqual(analyze({ tasks, draw, runs }, { n: 6, frameSize: 200, resamples: 200 }).secondary, open.secondary);
-  assert.match(allowedSentence(100, open.primary.b, open.primary.resolution), /no confirmatory test/);
-  assert.match(allowedSentence(400, { high: -0.01 }, { low: -0.06 }), /not met/);
+  assert.deepEqual(analyze({ tasks, draw, runs }, { n: 6, accepted, resamples: 200 }).secondary, open.secondary);
+  // (b) is tested only at 120 tasks from 80 repositories; resolution is always a description.
+  assert.match(allowedSentence({ tasks: 120, repositories: 80 }, { low: -0.2, high: -0.01 }), /favours the treatment/);
+  assert.match(allowedSentence({ tasks: 120, repositories: 80 }, { low: 0.01, high: 0.2 }), /favours the baseline/);
+  assert.match(allowedSentence({ tasks: 120, repositories: 80 }, { low: -0.1, high: 0.1 }), /no difference is claimed/);
+  assert.match(allowedSentence({ tasks: 119, repositories: 80 }, { low: -0.2, high: -0.01 }), /not confirmatory/);
+  assert.match(allowedSentence({ tasks: 400, repositories: 79 }, { low: -0.2, high: -0.01 }), /not confirmatory/);
+  for (const n of [10, 120, 400]) assert.match(allowedSentence({ tasks: n, repositories: 200 }, { low: 0, high: 0 }), /Resolution is reported as a description, with no non-inferiority test/);
+  // The draw must be exactly the accepted set, with the same repositories.
+  assert.throws(() => analyze({ tasks, draw, runs }, { n: 6, accepted: accepted.slice(1), resamples: 200 }), /not the accepted set/);
+  assert.throws(() => analyze({ tasks, draw, runs }, { n: 6, accepted: accepted.map((a, i) => (i ? a : { ...a, repo: "sample/other" })), resamples: 200 }), /names repository/);
   assert.equal(pilot({ tasks, runs }).tasks, 0);
   // Three repositories, each at the cap, reported beside N.
   assert.equal(open.counts.repositories, 3);
@@ -253,7 +264,7 @@ test("the analysis stays sealed until the registered N, then gives the paired di
   assert.equal(open.sensitivity.by_repository.b.estimate, -1);
   // A draw with a third task from one repository is refused before anything is computed.
   const over = [...tasks, { task_id: "sample__repo-7", repo: "sample/repo-1", split: "full", fail_to_pass_count: 1, pass_to_pass_count: 1 }];
-  assert.throws(() => analyze({ tasks: over, draw: [...draw, { position: 7, task_id: "sample__repo-7" }], runs }, { n: 6, frameSize: 200, resamples: 200 }), /more than 2 tasks from sample\/repo-1/);
+  assert.throws(() => analyze({ tasks: over, draw: [...draw, { position: 7, task_id: "sample__repo-7" }], runs }, { n: 6, accepted, resamples: 200 }), /more than 2 tasks from sample\/repo-1/);
 });
 
 test("the bootstrap resamples repositories, keeping every difference from a drawn one", async () => {

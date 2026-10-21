@@ -2,13 +2,15 @@
 // The paired comparison's analysis (the methods paper's protocol, section 6). This file
 // is hashed into the registration: what it computes is the result.
 //
-//   node scripts/analyze.mjs export.json --n <registered N> --frame-size <audited tasks> \
+//   node scripts/analyze.mjs export.json --n <registered N> --accepted accepted.json \
 //     [--seed <sampling seed>] [--flagged flagged.json] [--resamples 10000]
 //   node scripts/analyze.mjs export.json --pilot [--seed <seed>]
 //
 // export.json is { tasks, draw, runs }: the rows of bench_tasks, bench_draw and bench_runs
 // as Capsid's D1 returns them (README, "Exporting the data"). flagged.json is the list of
-// task ids a grader flagged for weak tests.
+// task ids a grader flagged for weak tests. accepted.json is the frozen accepted set,
+// [{ task_id, repo }, ...]; the sentence's floors are counted from it (section 6,
+// "Sentence"), and the export's draw must be exactly that set.
 //
 // WHAT IT READS. Each scored run's claim (claimed_done, from the claim file), its two
 // hidden test counts and the task's registered counts. Never the Worker's false_claim
@@ -182,26 +184,43 @@ function bounded(perTask, key, againstTreatment) {
   });
 }
 
-// The sentence the result allows, fixed by frame size before the draw (section 6).
-export function allowedSentence(frameSize, b, resolution) {
-  if (frameSize < 120) return "Below 120 audited tasks: no confirmatory test. Report the estimates descriptively.";
-  if (frameSize >= 400) {
-    const benefit = b.high < 0 && resolution.low > -0.05;
-    return benefit
-      ? "Co-primary met: the (b) interval lies entirely below zero and the resolution interval lies entirely above -5 points."
-      : "Co-primary not met: a benefit is not claimed.";
+// The floors for a confirmatory (b) test (section 6, "Sentence", decided 2026-10-21).
+export const FLOOR_TASKS = 120;
+export const FLOOR_REPOSITORIES = 80;
+
+// The sentence the result allows, from the frozen accepted set's own counts. Resolution
+// is always a description: no non-inferiority test and no equivalence wording.
+export function allowedSentence(accepted, b) {
+  const resolution = "Resolution is reported as a description, with no non-inferiority test and no equivalence wording.";
+  if (accepted.tasks < FLOOR_TASKS || accepted.repositories < FLOOR_REPOSITORIES) {
+    return `Below the floor (${accepted.tasks} accepted tasks from ${accepted.repositories} repositories; ${FLOOR_TASKS} from ${FLOOR_REPOSITORIES} needed): estimates and intervals only, not confirmatory. ${resolution}`;
   }
-  if (b.high < 0) return "(b) favours the treatment: its interval lies entirely below zero. Resolution is reported with no equivalence wording.";
-  if (b.low > 0) return "(b) favours the baseline: its interval lies entirely above zero. Resolution is reported with no equivalence wording.";
-  return "(b): no difference is claimed in either direction. Resolution is reported with no equivalence wording.";
+  if (b.high < 0) return `(b) favours the treatment: its interval lies entirely below zero. ${resolution}`;
+  if (b.low > 0) return `(b) favours the baseline: its interval lies entirely above zero. ${resolution}`;
+  return `(b): no difference is claimed in either direction. ${resolution}`;
+}
+
+// The frozen accepted set's counts, after checking that the export's draw is that set.
+export function acceptedCounts(accepted, drawn, tasks) {
+  const ids = accepted.map((a) => a.task_id);
+  if (new Set(ids).size !== ids.length) throw new Error("the accepted set lists a task twice");
+  const inDraw = new Set(drawn);
+  const missing = ids.filter((id) => !inDraw.has(id));
+  const extra = drawn.filter((id) => !ids.includes(id));
+  if (missing.length || extra.length) throw new Error(`the draw is not the accepted set (missing ${missing.length}, extra ${extra.length})`);
+  for (const a of accepted) {
+    if (tasks.get(a.task_id)?.repo !== a.repo) throw new Error(`accepted task ${a.task_id} names repository ${a.repo}, the registered task another`);
+  }
+  return { tasks: ids.length, repositories: new Set(accepted.map((a) => a.repo)).size };
 }
 
 // The whole analysis over an export. Returns { sealed: true, ... } with counts only while
 // the seal holds.
-export function analyze(data, { n, frameSize, seed = "capsid-bench", resamples = 10000, flagged = [] }) {
+export function analyze(data, { n, accepted, seed = "capsid-bench", resamples = 10000, flagged = [] }) {
   const tasks = new Map(data.tasks.map((t) => [t.task_id, t]));
   const drawn = [...data.draw].sort((x, y) => x.position - y.position).map((d) => d.task_id);
   const repos = repositories(drawn, tasks);
+  const acceptedSet = acceptedCounts(accepted, drawn, tasks);
   const outage = outageHours(data.runs);
   const byTaskArm = new Map();
   for (const run of [...data.runs].sort((x, y) => (x.started_at < y.started_at ? -1 : x.started_at > y.started_at ? 1 : 0))) {
@@ -254,7 +273,8 @@ export function analyze(data, { n, frameSize, seed = "capsid-bench", resamples =
     sealed: false,
     counts,
     primary: { b, resolution },
-    sentence: allowedSentence(frameSize, b, resolution),
+    accepted: acceptedSet,
+    sentence: allowedSentence(acceptedSet, b),
     sensitivity: {
       // The unweighted mean of the within-repository mean differences, same bootstrap.
       by_repository: { b: bootstrap(differences(perTask, "b"), resamples, random, { byRepository: true }), resolution: bootstrap(differences(perTask, "resolved"), resamples, random, { byRepository: true }) },
@@ -297,13 +317,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(JSON.stringify(pilot(data, { seed: flag("seed"), resamples }), null, 2));
   } else {
     const n = Number(flag("n"));
-    const frameSize = Number(flag("frame-size"));
-    if (!Number.isInteger(n) || n <= 0 || !Number.isInteger(frameSize) || frameSize <= 0) {
-      console.error("analyze: --n (the registered N) and --frame-size (the audited frame) are required");
+    if (!Number.isInteger(n) || n <= 0 || !flag("accepted")) {
+      console.error("analyze: --n (the registered N) and --accepted (the frozen accepted-set file) are required");
       process.exit(2);
     }
+    const accepted = JSON.parse(readFileSync(flag("accepted"), "utf8"));
     const flagged = flag("flagged") ? JSON.parse(readFileSync(flag("flagged"), "utf8")) : [];
-    const result = analyze(data, { n, frameSize, seed: flag("seed"), resamples, flagged });
+    const result = analyze(data, { n, accepted, seed: flag("seed"), resamples, flagged });
     console.log(JSON.stringify(result, null, 2));
     if (result.sealed) process.exit(3);
   }
