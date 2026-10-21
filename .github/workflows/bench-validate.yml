@@ -81,5 +81,6 @@ jobs:
           for key in ("FAIL_TO_PASS", "PASS_TO_PASS"):
               mine, theirs = set(res.get(key, [])), set(as_list(inst["expected"][key]))
               print(f"- {key}: found {len(mine)}, dataset {len(theirs)}, both {len(mine & theirs)}")
+          print(f"- unreadable runs: {res.get('unreadable_runs')}")
           PY
           done

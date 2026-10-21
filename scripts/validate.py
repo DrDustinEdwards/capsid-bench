@@ -47,8 +47,11 @@ def run(image, eval_script, patch, parse):
                 if applied.returncode != 0:
                     return None
             try:
-                out = subprocess.run(["docker", "exec", name, "/bin/bash", "/eval.sh"], capture_output=True, timeout=TIMEOUT)
-                log = out.stdout.decode("utf-8", "replace") + out.stderr.decode("utf-8", "replace")
+                # One stream, merged inside the container: the harness marks the test output
+                # with `: '>>>>> Start Test Output'` under set -x, which bash writes to stderr,
+                # while the tests write to stdout. Read apart, the markers would enclose nothing.
+                out = subprocess.run(["docker", "exec", name, "/bin/bash", "-c", "/bin/bash /eval.sh 2>&1"], capture_output=True, timeout=TIMEOUT)
+                log = out.stdout.decode("utf-8", "replace")
             except subprocess.TimeoutExpired:
                 return None
             log_path = Path(tmp, "test_output.txt")
@@ -103,7 +106,7 @@ def main():
         result.update(verdict="recipe not usable at the base commit", detail=str(err)[:500])
     else:
         client = docker.from_env(timeout=600)
-        built, failed_builds = build_instance_images(client, [instance], max_workers=1)
+        built, failed_builds = build_instance_images(client, [instance], max_workers=1, tag="latest")
         if failed_builds or not built:
             result.update(verdict="build failed")
         else:
@@ -111,6 +114,9 @@ def main():
             befores = [run(spec.instance_image_key, spec.eval_script, None, parse) for _ in range(RERUNS)]
             afters = [run(spec.instance_image_key, spec.eval_script, instance["patch"], parse) for _ in range(RERUNS)]
             result.update(verdict(befores, afters, test_passed, test_failed))
+            # Runs whose log the parser could not read (tests errored or timed out, or the
+            # patch did not apply), so a verdict reached on empty runs shows as such.
+            result["unreadable_runs"] = {"before": sum(r is None for r in befores), "after": sum(r is None for r in afters)}
             result["image"] = spec.instance_image_key
     Path(out_path).write_text(json.dumps(result, indent=1) + "\n")
     print(f"{result['task_id']}: {result['verdict']}")
