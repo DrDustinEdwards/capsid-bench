@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The registered seed (protocol section 4, "Seed", decided 2026-10-21): the randomness of
-// drand quicknet round R, where R is the first round at or after the registration's
-// instant T. Fetches the round from drand, checks its BLS signature against quicknet's
+// drand quicknet round R, where R = floor((T - genesis) / 3) + 1 for the registration's
+// instant T: the round produced at T, or the last one before it. Fetches the round from drand, checks its BLS signature against quicknet's
 // public key and that the randomness is the SHA-256 of the signature, and prints the
 // record the walk's start keeps.
 //
