@@ -81,7 +81,8 @@ export function labels(run, task) {
 // The slots of one task and arm, replayed in start order as Capsid's /bench/start fills
 // them (src/bench.ts nextSlot): an outage stop is no attempt, an unjudged first attempt
 // leaves its slot waiting for one rerun. Each slot ends as its scored run, as null (two
-// unjudged attempts), or as "open" (not finished: running, or waiting for its rerun).
+// unjudged attempts, or a run whose seal did not verify: scripts/unseal.mjs marks it
+// "missing", section 8), or as "open" (not finished: running, or waiting for its rerun).
 export function slots(runs, outage) {
   const out = [];
   let waiting = false;
@@ -90,14 +91,14 @@ export function slots(runs, outage) {
     if (status === "outage") continue;
     if (waiting) {
       waiting = false;
-      out[out.length - 1] = status === "scored" ? run : status === "unjudged" ? null : "open";
+      out[out.length - 1] = status === "scored" ? run : status === "unjudged" || status === "missing" ? null : "open";
       continue;
     }
     if (out.length === SLOTS) break;
     if (status === "unjudged") {
       waiting = true;
       out.push("open");
-    } else out.push(status === "scored" ? run : "open");
+    } else out.push(status === "scored" ? run : status === "missing" ? null : "open");
   }
   return out;
 }
@@ -241,6 +242,8 @@ export function analyze(data, { n, accepted, audit, seed = "capsid-bench", resam
   const drawn = [...data.draw].sort((x, y) => x.position - y.position).map((d) => d.task_id);
   const repos = repositories(drawn, tasks);
   const acceptedSet = acceptedCounts(accepted, drawn, tasks);
+  const unopened = data.runs.find((run) => run.status === "scored" && reportOf(run).sealed && !Number.isInteger(run.fail_to_pass_passed));
+  if (unopened) throw new Error(`run ${unopened.id} is still sealed: open the export with scripts/unseal.mjs first`);
   const outage = outageHours(data.runs);
   const byTaskArm = new Map();
   for (const run of [...data.runs].sort((x, y) => (x.started_at < y.started_at ? -1 : x.started_at > y.started_at ? 1 : 0))) {

@@ -144,10 +144,22 @@ The analysis script decrypts a run only after R_seal, and only when its Rekor en
 
 This seal does not stop the person who administers the runner from copying plaintext before encryption. The paper states that limit.
 
+**How the seal is built (2026-10-22).** The ruling above is Grok's text; these are the points where the build differs from it or fills it in.
+
+- *Where the ciphertext is kept.* The Worker accepts a report of at most 16 KB, which a transcript exceeds, so the ciphertext and its Sigstore bundle are kept on the public `sealed` branch of the bench repository (`sealed/<run>.tlock`, `sealed/<run>.sigstore.json`). The Worker stores the ciphertext's SHA-256 and its Rekor log index with the run.
+- *What Rekor holds.* The workflow signs the ciphertext keylessly with Sigstore. Its Rekor entry holds the ciphertext's SHA-256 and a certificate naming the workflow file, its branch, its commit and the Actions run. The run id is inside the ciphertext and in the file name, not in Rekor.
+- *The workflow hash.* "The workflow file hash matches" is checked as the commit in the signing certificate, which fixes the workflow file: it must be the commit registered here, so the workflow is not changed during the study.
+- *What the Worker gets.* For a sealed run, only the environment check, the hidden suites' sizes (already registered), whether the run stopped on an error, the treatment's job id, the model and Claude Code version, and the seal's hash and index. No passed count, claim or usage figure. Capsid records the run as scored with its outcome columns empty, and it records a model run on a confirmatory task that arrives unsealed as unjudged.
+- *Between the two jobs.* The repository's logs and run artifacts are public. The run's files pass from the agent job to the scoring job encrypted under a key derived from the bench key, and no step writes a claim, a transcript or a hidden test result to a log.
+- *A run that cannot be sealed* (the seal round already published, Sigstore or the push failing) is posted as unjudged.
+- *Opening.* `scripts/unseal.mjs` opens a run only when its ciphertext's hash is the one the Worker recorded, its Sigstore bundle verifies as signed by the registered workflow at the registered commit, its Rekor entry is the recorded index and was integrated before round R_seal, and the ciphertext is locked to R_seal and opens to that run's own bundle. A run that fails any check is a missing run.
+- *What stays readable.* The treatment's Capsid job is part of the treatment itself and stays readable in Capsid during the study. It carries no hidden test result, but it does show the agent's work, so the same operator limit applies to it.
+
 ## 9. Hashed into the registration
 
 - this protocol;
-- the workflow;
+- the workflow, and its commit, which every seal must name (section 8);
+- the seal and its opening (`scripts/seal.mjs`, `scripts/seal-run.sh`, `scripts/unseal.mjs`);
 - the scorer;
 - the claim parser and claim tool;
 - `/bench/start`'s slot rule;
