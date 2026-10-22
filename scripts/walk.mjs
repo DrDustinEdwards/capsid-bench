@@ -10,7 +10,9 @@
 // off. The walk is strictly in order: no candidate is considered until the one before it
 // is recorded, including both readers' audit decisions.
 //
-//   node scripts/walk.mjs start --dir <walk dir> --beacon seed.json --n <registered N> --registration <sha256>
+//   node scripts/walk.mjs start --dir <walk dir> --beacon seed.json --registration <sha256>
+//
+// N is 160, fixed in scripts/analyze.mjs; start refuses any other --n.
 //   node scripts/walk.mjs step --frame frame/candidates.json --repos frame/repos.json --dir <walk dir>
 //   node scripts/walk.mjs open-audits --dir <walk dir> --repo owner/name
 //   node scripts/walk.mjs record --dir <walk dir> --issue <n> --commenter <login> --body-file <f> --author <login>
@@ -32,7 +34,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, write
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { REPO_CAP, rng } from "./analyze.mjs";
+import { N, REPO_CAP, rng } from "./analyze.mjs";
 import { addedIdentifiers, github, introducedIdentifiers, leakage, prepare } from "./prepare-candidate.mjs";
 
 // The frozen frame (run 39487118514, frame/candidates.json). The walk refuses any other.
@@ -90,11 +92,12 @@ export function replay(candidates, log) {
   };
 }
 
-// What happens next, from the state alone. The second reader goes first: it is a call the
-// walk makes itself, and it is blind to the author either way.
+// What happens next, from the state alone. The author decides first and the second reader
+// after, so no author decision is made with the second reader's response in the public
+// log (Grok's third review, 2026-10-22). The second reader is blind to the author either way.
 export function nextAction(state) {
-  if (state.pendingSecond.length) return { action: "second-read", task_id: state.pendingSecond[0], position: state.order.indexOf(state.pendingSecond[0]) + 1 };
   if (state.pendingAuthor.length) return { action: "wait", reader: "author", tasks: state.pendingAuthor };
+  if (state.pendingSecond.length) return { action: "second-read", task_id: state.pendingSecond[0], position: state.order.indexOf(state.pendingSecond[0]) + 1 };
   if (state.accepted.length < state.n && state.next <= state.order.length) {
     const taskId = state.order[state.next - 1];
     const repo = state.byId.get(taskId).repo;
@@ -200,29 +203,29 @@ export function fenced(text, lang = "") {
 const LIMIT = 15000;
 const clip = (text, link) => (text.length <= LIMIT ? text : `${text.slice(0, LIMIT)}\n… cut at ${LIMIT} characters; the whole file: ${link}`);
 
-// The audit issue's text. Never carries the other reader's decision.
-export function auditBody(instance, reader, fileUrl) {
+// The audit issue's text: the second reader's packet (the repository, the frozen issue,
+// the hidden test names and the test patch), never the gold patch and never the other
+// reader's decision (Grok's third review, 2026-10-22). A field too long for an issue is
+// cut, with a link to the instance file, which does not hold the gold patch either.
+export function auditBody(instance, fileUrl) {
   const reasons = Object.entries(REASONS).map(([code, text]) => `- \`${code}\`: ${text}`).join("\n");
   return [
-    `Audit by the ${reader === "author" ? "author" : "second reader"}, against the fixed exclusion list (protocol section 4, step 6).`,
+    "Audit by the author, against the fixed exclusion list (protocol section 4, step 6).",
     "",
-    "Answer with one comment: `in`, or `out <code>` followed by a quote from the issue, tests or patch that shows the reason. The first valid comment is recorded and closes this issue.",
+    "Answer with one comment: `in`, or `out <code>` followed by a quote from the issue or the tests that shows the reason. The first valid comment is recorded and closes this issue.",
     "",
     reasons,
+    "",
+    `Repository: ${fenced(instance.repo)}`,
     "",
     "### The frozen issue",
     fenced(clip(instance.problem_statement, fileUrl)),
     "",
-    `### The hidden tests (FAIL_TO_PASS, ${instance.FAIL_TO_PASS.length})`,
+    `### The tests that judge a fix (FAIL_TO_PASS, ${instance.FAIL_TO_PASS.length})`,
     fenced(clip(instance.FAIL_TO_PASS.join("\n"), fileUrl)),
     "",
-    "### The test patch",
+    "### The test change",
     fenced(clip(instance.test_patch, fileUrl), "diff"),
-    "",
-    "### The gold patch",
-    fenced(clip(instance.patch, fileUrl), "diff"),
-    "",
-    `Repository ${fenced(instance.repo)} at base commit ${fenced(instance.base_commit)}; the whole task file is ${fileUrl}.`,
   ].join("\n");
 }
 
@@ -265,7 +268,10 @@ async function gates(dir, candidate, recipe, position) {
   if (result.verdict !== "passed") return { ...base, event: "excluded", step: "validation", reason: result.verdict, unreadable_runs: result.unreadable_runs, detail: result.detail };
   const matches = leakage(instance.patch, instance.problem_statement ?? "", introducedIdentifiers(instance.patch, await namesInBase(candidate.repo, instance.base_commit, addedIdentifiers(instance.patch))));
   if (matches.length) return { ...base, event: "excluded", step: "leakage", reason: "leakage screen", matches };
-  const task = { ...instance, FAIL_TO_PASS: result.FAIL_TO_PASS, PASS_TO_PASS: result.PASS_TO_PASS };
+  // The gold patch stays off the walk branch: the instance keeps only its SHA-256, and the
+  // task files for the runs prepare it again from GitHub after the walk, checked against it.
+  const { patch, ...rest } = instance;
+  const task = { ...rest, patch_sha256: createHash("sha256").update(patch).digest("hex"), FAIL_TO_PASS: result.FAIL_TO_PASS, PASS_TO_PASS: result.PASS_TO_PASS };
   mkdirSync(join(dir, "instances"), { recursive: true });
   writeFileSync(join(dir, "instances", `${candidate.task_id}.json`), `${JSON.stringify(task, null, 1)}\n`);
   return { ...base, event: "gates passed", fail_to_pass: task.FAIL_TO_PASS.length, pass_to_pass: task.PASS_TO_PASS.length };
@@ -285,9 +291,10 @@ async function main() {
     // The seed is the verified drand round's randomness (scripts/seed.mjs), never typed in.
     const beacon = JSON.parse(readFileSync(values.beacon, "utf8"));
     if (!/^[0-9a-f]{64}$/.test(beacon.randomness ?? "") || !beacon.t) throw new Error("start needs the registered round from scripts/seed.mjs --t");
-    if (!/^[1-9]\d*$/.test(values.n ?? "") || !/^[0-9a-f]{64}$/.test(values.registration ?? "")) throw new Error("start needs a positive --n and the registration's --registration sha256");
+    if (values.n !== undefined && Number(values.n) !== N) throw new Error(`N is fixed at ${N} by the registration`);
+    if (!/^[0-9a-f]{64}$/.test(values.registration ?? "")) throw new Error("start needs the registration's --registration sha256");
     const second_reader = secondReaderConfig(process.env, readFileSync(PROMPT_PATH));
-    const record = { event: "start", seed: beacon.randomness, n: Number(values.n), cap: REPO_CAP, frame_sha256: FRAME_SHA256, registration_sha256: values.registration, beacon, second_reader };
+    const record = { event: "start", seed: beacon.randomness, n: N, cap: REPO_CAP, frame_sha256: FRAME_SHA256, registration_sha256: values.registration, beacon, second_reader };
     if (log.length) {
       const same = ["seed", "n", "registration_sha256"].every((k) => log[0][k] === record[k]);
       if (!same) throw new Error("the walk has already started with another seed, N or registration");
@@ -342,7 +349,7 @@ async function main() {
       const instance = JSON.parse(readFileSync(join(dir, "instances", `${id}.json`), "utf8"));
       const position = state.order.indexOf(id) + 1;
       const fileUrl = `https://github.com/${values.repo}/blob/walk/instances/${encodeURIComponent(id)}.json`;
-      const issue = await createIssue(values.repo, `Audit (${reader === "author" ? "author" : "second reader"}) ${position}: ${id}`, auditBody(instance, reader, fileUrl));
+      const issue = await createIssue(values.repo, `Audit (${reader === "author" ? "author" : "second reader"}) ${position}: ${id}`, auditBody(instance, fileUrl));
       append(dir, { event: "audit opened", reader, task_id: id, position, issue });
       console.log(`opened #${issue}: ${reader} audit of ${id}`);
     }

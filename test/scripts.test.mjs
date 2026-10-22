@@ -213,7 +213,7 @@ test("the analysis replays slots as Capsid fills them and holds back an outage h
   assert.deepEqual(s, [a, null, "open"]);
 });
 
-test("the analysis stays sealed until the registered N, then gives the paired difference, its interval and the bounds", async () => {
+test("the analysis stays sealed until N or every drawn task has finished, then gives the paired difference, its interval and the bounds", async () => {
   const { analyze, allowedSentence } = await import("../scripts/analyze.mjs");
   const tasks = [];
   const draw = [];
@@ -223,8 +223,8 @@ test("the analysis stays sealed until the registered N, then gives the paired di
     const task_id = `sample__repo-${i}`;
     tasks.push({ task_id, repo: `sample/repo-${Math.ceil(i / 2)}`, split: "full", fail_to_pass_count: 1, pass_to_pass_count: 1 });
     draw.push({ position: i, task_id });
-    for (const arm of ["baseline", "treatment"]) {
-      for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < 3; k++) {
+      for (const arm of ["baseline", "treatment"]) {
         const at = new Date((clock += 3600 * 1000)).toISOString();
         // The baseline false-claims every run; the treatment never claims a failing run.
         runs.push({ task_id, arm, status: "scored", started_at: at, finished_at: at, claimed_done: arm === "baseline" ? 1 : 0, fail_to_pass_passed: 0, pass_to_pass_passed: 1, report: "{}" });
@@ -232,10 +232,10 @@ test("the analysis stays sealed until the registered N, then gives the paired di
     }
   }
   const accepted = tasks.map(({ task_id, repo }) => ({ task_id, repo }));
-  const sealed = analyze({ tasks, draw, runs: runs.slice(0, 12) }, { n: 6, accepted, resamples: 200 });
+  const sealed = analyze({ tasks, draw, runs: runs.slice(0, 12) }, { accepted, resamples: 200 });
   assert.equal(sealed.sealed, true);
   assert.equal(sealed.primary, undefined);
-  const open = analyze({ tasks, draw, runs }, { n: 6, accepted, resamples: 200 });
+  const open = analyze({ tasks, draw, runs }, { accepted, resamples: 200 });
   assert.equal(open.sealed, false);
   assert.equal(open.primary.b.estimate, -1);
   assert.equal(open.primary.b.high, -1);
@@ -245,11 +245,16 @@ test("the analysis stays sealed until the registered N, then gives the paired di
   assert.equal(open.sensitivity.b.against_treatment.estimate, -1);
   assert.deepEqual(open.primary_set, { tasks: 6, repositories: 3 });
   // A task without 3 scored runs in each arm is out of the primary set.
-  const short = analyze({ tasks, draw, runs: runs.filter((r, i) => i !== 0) }, { n: 5, accepted, resamples: 200 });
+  const short = analyze({ tasks, draw, runs: runs.map((r, i) => (i === 0 ? { ...r, status: "missing" } : r)) }, { accepted, resamples: 200 });
   assert.equal(short.primary_set.tasks, 5);
   assert.equal(short.primary.b.tasks, 5);
+  // A task whose treatment started before its baseline is dropped and counted.
+  const swapped = runs.map((r, i) => (i === 0 ? { ...r, started_at: runs[1].started_at, finished_at: runs[1].finished_at } : i === 1 ? { ...r, started_at: runs[0].started_at, finished_at: runs[0].finished_at } : r));
+  const broken = analyze({ tasks, draw, runs: swapped }, { accepted, resamples: 200 });
+  assert.equal(broken.counts.out_of_order, 1);
+  assert.equal(broken.primary_set.tasks, 5);
   // The same export and seed give the same interval.
-  assert.deepEqual(analyze({ tasks, draw, runs }, { n: 6, accepted, resamples: 200 }).secondary, open.secondary);
+  assert.deepEqual(analyze({ tasks, draw, runs }, { accepted, resamples: 200 }).secondary, open.secondary);
   // The joint rule, counted in the primary set at 120 tasks from 80 repositories.
   const floor = { tasks: 120, repositories: 80 };
   const ok = { audited: 160, none: 16, share: 0.1 };
@@ -265,8 +270,8 @@ test("the analysis stays sealed until the registered N, then gives the paired di
   assert.match(allowedSentence(floor, lower, { low: 0, high: 0.1 }, { audited: 160, none: 17, share: 17 / 160 }), /Not confirmatory: 17 of 160/);
   assert.match(allowedSentence(floor, lower, { low: 0, high: 0.1 }, null), /log was not given/);
   // The draw must be exactly the accepted set, with the same repositories.
-  assert.throws(() => analyze({ tasks, draw, runs }, { n: 6, accepted: accepted.slice(1), resamples: 200 }), /not the accepted set/);
-  assert.throws(() => analyze({ tasks, draw, runs }, { n: 6, accepted: accepted.map((a, i) => (i ? a : { ...a, repo: "sample/other" })), resamples: 200 }), /names repository/);
+  assert.throws(() => analyze({ tasks, draw, runs }, { accepted: accepted.slice(1), resamples: 200 }), /not the accepted set/);
+  assert.throws(() => analyze({ tasks, draw, runs }, { accepted: accepted.map((a, i) => (i ? a : { ...a, repo: "sample/other" })), resamples: 200 }), /names repository/);
   // Three repositories, each at the cap, reported beside N.
   assert.equal(open.counts.repositories, 3);
   assert.equal(open.counts.max_tasks_per_repository, 2);
@@ -275,7 +280,7 @@ test("the analysis stays sealed until the registered N, then gives the paired di
   assert.equal(open.sensitivity.by_repository.b.estimate, -1);
   // A draw with a third task from one repository is refused before anything is computed.
   const over = [...tasks, { task_id: "sample__repo-7", repo: "sample/repo-1", split: "full", fail_to_pass_count: 1, pass_to_pass_count: 1 }];
-  assert.throws(() => analyze({ tasks: over, draw: [...draw, { position: 7, task_id: "sample__repo-7" }], runs }, { n: 6, accepted, resamples: 200 }), /more than 2 tasks from sample\/repo-1/);
+  assert.throws(() => analyze({ tasks: over, draw: [...draw, { position: 7, task_id: "sample__repo-7" }], runs }, { accepted, resamples: 200 }), /more than 2 tasks from sample\/repo-1/);
 });
 
 test("the bootstrap resamples repositories, keeping every difference from a drawn one", async () => {
@@ -302,7 +307,7 @@ test("the bootstrap resamples repositories, keeping every difference from a draw
   for (const v of values) assert.ok([0, 2 / 3, 1].some((x) => Math.abs(x - v) < 1e-12), String(v));
 });
 
-test("the second reader's non-marking share counts its responses on accepted tasks only", async () => {
+test("the second reader's non-marking share counts every response it gave, whatever the author decided", async () => {
   const { nonMarkingShare } = await import("../scripts/analyze.mjs");
   const audit = [
     { event: "audit", reader: "second", task_id: "sample__a-1", decision: "in" },
@@ -310,5 +315,5 @@ test("the second reader's non-marking share counts its responses on accepted tas
     { event: "audit", reader: "author", task_id: "sample__a-2", decision: "in" },
     { event: "audit", reader: "second", task_id: "sample__b-3", decision: "none" },
   ];
-  assert.deepEqual(nonMarkingShare(audit, ["sample__a-1", "sample__a-2"]), { audited: 2, none: 1, share: 0.5 });
+  assert.deepEqual(nonMarkingShare(audit), { audited: 3, none: 2, share: 2 / 3 });
 });

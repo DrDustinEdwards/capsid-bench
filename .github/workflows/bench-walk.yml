@@ -4,7 +4,7 @@ name: bench-walk
 # frozen frame in the registered seed's order, one candidate at a time, until a candidate
 # needs an audit, the walk is done, or the time budget runs out, then opens one issue per
 # audit due. The log and the instances that passed both gates live on the `walk` branch,
-# committed after every step. Started by hand once with the registered T, N and registration hash, and
+# committed after every step. Started by hand once with the registered T and registration hash (N is fixed at 160), and
 # again by bench-audit.yml after each recorded audit. Calls the second reader; starts no arm run.
 
 on:
@@ -12,9 +12,6 @@ on:
     inputs:
       t:
         description: The registered instant T, UTC (first start only; the seed is drand quicknet's round at T)
-        default: ""
-      n:
-        description: The registered N (first start only)
         default: ""
       registration:
         description: The registration's SHA-256 (first start only)
@@ -73,20 +70,19 @@ jobs:
         if: inputs.t != ''
         env:
           T: ${{ inputs.t }}
-          N: ${{ inputs.n }}
           REGISTRATION: ${{ inputs.registration }}
         run: |
           set -euo pipefail
           npm install --no-save --silent --prefix "${RUNNER_TEMP}/noble" @noble/curves@2.4.0
           NOBLE_BLS="${RUNNER_TEMP}/noble/node_modules/@noble/curves/bls12-381.js" node scripts/seed.mjs --t "${T}" > "${RUNNER_TEMP}/seed.json"
           cat "${RUNNER_TEMP}/seed.json" | tee -a "$GITHUB_STEP_SUMMARY"
-          node scripts/walk.mjs start --dir walk-state --beacon "${RUNNER_TEMP}/seed.json" --n "${N}" --registration "${REGISTRATION}"
+          node scripts/walk.mjs start --dir walk-state --beacon "${RUNNER_TEMP}/seed.json" --registration "${REGISTRATION}"
           cd walk-state && git add -A && { git diff --cached --quiet || { git commit -qm "walk: start" && git push -q origin walk; }; }
 
       - name: Install the harness
         run: |
           set -euo pipefail
-          [ -s walk-state/log.jsonl ] || { echo "the walk has not started: dispatch with the registered T, N and registration hash" >&2; exit 1; }
+          [ -s walk-state/log.jsonl ] || { echo "the walk has not started: dispatch with the registered T and registration hash" >&2; exit 1; }
           python3 -m pip install --quiet "swebench @ ${HARNESS}"
 
       - name: Walk

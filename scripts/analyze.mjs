@@ -2,7 +2,7 @@
 // The paired comparison's analysis (the methods paper's protocol, section 6). This file
 // is hashed into the registration: what it computes is the result.
 //
-//   node scripts/analyze.mjs export.json --n <registered N> --accepted accepted.json \
+//   node scripts/analyze.mjs export.json --accepted accepted.json \
 //     --audit log.jsonl [--seed <sampling seed>] [--flagged flagged.json] [--resamples 10000]
 //
 // export.json is { tasks, draw, runs }: the rows of bench_tasks, bench_draw and bench_runs
@@ -19,13 +19,20 @@
 // column (the older "claimed and not resolved" definition), and never job status,
 // job_outcomes or job_claims.
 //
-// It computes no per-arm figure until the primary set has the registered N tasks or every
-// drawn task has finished its slots; before then it prints run counts only and exits 3.
+// It computes no per-arm figure until the primary set has N = 160 tasks or every task in
+// the frozen draw has finished its slots; before then it prints run counts only and exits
+// 3. N is fixed here, not taken as an argument (Grok's third review, 2026-10-22).
+//
+// THE ORDER (section 5). A task whose start times break the order baseline, treatment,
+// baseline, treatment, baseline, treatment (a run started out of turn, or while the run
+// before it was still going) is dropped from the primary set and counted.
 
 import { readFileSync } from "node:fs";
 
 export const MODEL_ARMS = ["baseline", "treatment"];
 export const SLOTS = 3;
+// The registered N (section 4).
+export const N = 160;
 const OUTAGE_MIN_ENDED = 4;
 
 const reportOf = (run) => {
@@ -166,8 +173,33 @@ export function repositories(drawn, tasks) {
   };
 }
 
-// The primary set: tasks with 3 scored runs in each arm.
-const complete = (t) => t.baseline.length === SLOTS && t.treatment.length === SLOTS;
+// The primary set: tasks with 3 scored runs in each arm, run in order.
+const complete = (t) => !t.out_of_order && t.baseline.length === SLOTS && t.treatment.length === SLOTS;
+
+// Whether one task's model runs, in start order, break the alternating order. Capsid's
+// rule (src/bench.ts orderRefusal), replayed: the next slot is baseline when both arms have
+// ended as many slots, else treatment; an unjudged first attempt is rerun in the same arm;
+// an outage stop is no attempt and is rerun; and no run starts before the one before it
+// has finished.
+export function outOfOrder(runs, outage) {
+  const done = { baseline: 0, treatment: 0 };
+  let waiting = null;
+  let previous = null;
+  for (const run of runs) {
+    if (previous && (!previous.finished_at || run.started_at < previous.finished_at)) return true;
+    previous = run;
+    const expected = waiting ?? (done.baseline === done.treatment ? "baseline" : "treatment");
+    if (run.arm !== expected) return true;
+    const status = analysisStatus(run, outage);
+    if (status === "outage") continue;
+    if (waiting) {
+      waiting = null;
+      done[run.arm]++;
+    } else if (status === "unjudged") waiting = run.arm;
+    else done[run.arm]++;
+  }
+  return false;
+}
 
 // Per task in the primary set, each arm's scored-run rate of one label; the difference is
 // treatment minus baseline.
@@ -194,8 +226,8 @@ export const FLOOR_TASKS = 120;
 export const FLOOR_REPOSITORIES = 80;
 // The resolution margin of the joint rule (decided 2026-10-22): 10 percentage points.
 export const MARGIN = 0.1;
-// Above this share of non-marking second-reader responses on accepted tasks, the result is
-// not confirmatory (section 4, "Second reader").
+// Above this share of non-marking second-reader responses, over every candidate it read,
+// the result is not confirmatory (section 4, "Second reader").
 export const NON_MARKING_MAX = 0.1;
 
 // The sentence the result allows (section 6, "Sentence"). The treatment is favoured only
@@ -206,17 +238,18 @@ export function allowedSentence(primary, b, resolution, nonMarking) {
     return `Below the floor (${primary.tasks} primary-set tasks from ${primary.repositories} repositories; ${FLOOR_TASKS} from ${FLOOR_REPOSITORIES} needed): estimates and intervals only, not confirmatory.`;
   }
   if (!nonMarking || nonMarking.share > NON_MARKING_MAX) {
-    const why = nonMarking ? `${nonMarking.none} of ${nonMarking.audited} second-reader responses on accepted tasks did not mark in or out` : "the second reader's log was not given";
+    const why = nonMarking ? `${nonMarking.none} of ${nonMarking.audited} second-reader responses did not mark in or out` : "the second reader's log was not given";
     return `Not confirmatory: ${why} (at most ${NON_MARKING_MAX * 100}% allowed). Estimates and intervals only.`;
   }
   if (b.high < 0 && resolution.low > -MARGIN) return "The treatment is favoured: the (b) interval lies entirely below zero and the resolution interval entirely above -10 points.";
   return "Neither arm is favoured: estimates and intervals only.";
 }
 
-// The second reader's responses on the accepted tasks that marked neither in nor out.
-export function nonMarkingShare(audit, acceptedIds) {
-  const ids = new Set(acceptedIds);
-  const second = audit.filter((r) => r.event === "audit" && r.reader === "second" && ids.has(r.task_id));
+// The share of the second reader's responses that marked neither in nor out, over every
+// candidate it read (every one that passed both gates), so the author's later decisions
+// cannot move it. The walk asks the second reader only after the author has decided.
+export function nonMarkingShare(audit) {
+  const second = audit.filter((r) => r.event === "audit" && r.reader === "second");
   const none = second.filter((r) => r.decision === "none").length;
   return { audited: second.length, none, share: second.length ? none / second.length : 1 };
 }
@@ -237,7 +270,7 @@ export function acceptedCounts(accepted, drawn, tasks) {
 
 // The whole analysis over an export. Returns { sealed: true, ... } with counts only while
 // the seal holds.
-export function analyze(data, { n, accepted, audit, seed = "capsid-bench", resamples = 10000, flagged = [] }) {
+export function analyze(data, { accepted, audit, seed = "capsid-bench", resamples = 10000, flagged = [] }) {
   const tasks = new Map(data.tasks.map((t) => [t.task_id, t]));
   const drawn = [...data.draw].sort((x, y) => x.position - y.position).map((d) => d.task_id);
   const repos = repositories(drawn, tasks);
@@ -252,8 +285,9 @@ export function analyze(data, { n, accepted, audit, seed = "capsid-bench", resam
     byTaskArm.set(key, [...(byTaskArm.get(key) ?? []), run]);
   }
   const started = drawn.filter((id) => MODEL_ARMS.some((arm) => byTaskArm.has(`${id}\u0000${arm}`)));
+  const startOrder = (id) => MODEL_ARMS.flatMap((arm) => byTaskArm.get(`${id}\u0000${arm}`) ?? []).sort((x, y) => (x.started_at < y.started_at ? -1 : x.started_at > y.started_at ? 1 : 0));
   const perTask = started.map((id) => {
-    const row = { task_id: id, repo: tasks.get(id).repo, missing: {}, finished: true };
+    const row = { task_id: id, repo: tasks.get(id).repo, missing: {}, finished: true, out_of_order: outOfOrder(startOrder(id), outage) };
     for (const arm of MODEL_ARMS) {
       const s = slots(byTaskArm.get(`${id}\u0000${arm}`) ?? [], outage);
       if (s.length < SLOTS || s.includes("open")) row.finished = false;
@@ -265,10 +299,10 @@ export function analyze(data, { n, accepted, audit, seed = "capsid-bench", resam
   });
   const primarySet = perTask.filter(complete);
   const exhausted = drawn.length > 0 && drawn.every((id) => perTask.find((t) => t.task_id === id)?.finished);
-  const counts = { drawn: drawn.length, started: started.length, primary_set: primarySet.length, runs: data.runs.filter((r) => MODEL_ARMS.includes(r.arm)).length, outage_hours: outage.size, ...repos };
-  if (!(primarySet.length >= n || exhausted)) return { sealed: true, counts, why: `${primarySet.length} of the registered ${n} tasks in the primary set and the frame is not exhausted` };
+  const counts = { drawn: drawn.length, started: started.length, primary_set: primarySet.length, runs: data.runs.filter((r) => MODEL_ARMS.includes(r.arm)).length, outage_hours: outage.size, out_of_order: perTask.filter((t) => t.out_of_order).length, ...repos };
+  if (!(primarySet.length >= N || exhausted)) return { sealed: true, counts, why: `${primarySet.length} of the registered ${N} tasks in the primary set, and not every drawn task has finished its slots` };
 
-  const nonMarking = audit ? nonMarkingShare(audit, accepted.map((a) => a.task_id)) : null;
+  const nonMarking = audit ? nonMarkingShare(audit) : null;
   const random = rng(seed);
   const interval = (key, rows = perTask) => bootstrap(differences(rows, key), resamples, random);
   const b = interval("b");
@@ -321,15 +355,18 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   };
   const data = JSON.parse(readFileSync(argv[0], "utf8"));
   const resamples = Number(flag("resamples") ?? 10000);
-  const n = Number(flag("n"));
-  if (!Number.isInteger(n) || n <= 0 || !flag("accepted") || !flag("audit")) {
-    console.error("analyze: --n (the registered N), --accepted (the frozen accepted-set file) and --audit (the walk's log) are required");
+  if (flag("n") !== undefined && Number(flag("n")) !== N) {
+    console.error(`analyze: N is fixed at ${N} by the registration`);
+    process.exit(2);
+  }
+  if (!flag("accepted") || !flag("audit")) {
+    console.error("analyze: --accepted (the frozen accepted-set file) and --audit (the walk's log) are required");
     process.exit(2);
   }
   const accepted = JSON.parse(readFileSync(flag("accepted"), "utf8"));
   const audit = readFileSync(flag("audit"), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
   const flagged = flag("flagged") ? JSON.parse(readFileSync(flag("flagged"), "utf8")) : [];
-  const result = analyze(data, { n, accepted, audit, seed: flag("seed"), resamples, flagged });
+  const result = analyze(data, { accepted, audit, seed: flag("seed"), resamples, flagged });
   console.log(JSON.stringify(result, null, 2));
   if (result.sealed) process.exit(3);
 }
