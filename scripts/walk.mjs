@@ -14,14 +14,18 @@
 //   node scripts/walk.mjs start --dir <walk dir> --beacon seed.json --n <registered N> --registration <sha256>
 //   node scripts/walk.mjs step --frame frame/candidates.json --repos frame/repos.json --dir <walk dir>
 //   node scripts/walk.mjs open-audits --dir <walk dir> --repo owner/name
-//   node scripts/walk.mjs record --dir <walk dir> --issue <n> --commenter <login> --body-file <f> \
-//     --author <login> [--second-reader <login>]
+//   node scripts/walk.mjs record --dir <walk dir> --issue <n> --commenter <login> --body-file <f> --author <login>
 //   node scripts/walk.mjs status --frame frame/candidates.json --dir <walk dir>
 //
 // `step` does one thing and prints it as JSON: { action, ... }. Actions: skip (repository
 // at the cap), validate (one candidate through preparation, validation and the leakage
-// screen), draw-second (the second reader's subset, fixed in the log), wait (an audit is
-// open) and done.
+// screen), draw-second (the second reader's subset, fixed in the log), second-read (one
+// task put to the second reader), wait (an author audit is open) and done.
+//
+// The second reader is a model from another vendor (protocol, "Second reader", decided
+// 2026-10-21), frozen in the start record: an OpenAI-compatible chat endpoint, the model
+// identifier, and the SHA-256 of prompts/second-reader.md. SECOND_READER_URL,
+// SECOND_READER_MODEL and SECOND_READER_KEY name it; a change after the start is refused.
 
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -120,7 +124,7 @@ export function secondSubset(state) {
 // What happens next, from the state alone.
 export function nextAction(state) {
   if (state.pendingAuthor.length) return { action: "wait", reader: "author", tasks: state.pendingAuthor };
-  if (state.pendingSecond.length) return { action: "wait", reader: "second", tasks: state.pendingSecond };
+  if (state.pendingSecond.length) return { action: "second-read", task_id: state.pendingSecond[0], position: state.order.indexOf(state.pendingSecond[0]) + 1 };
   if (state.accepted.length < state.n && state.next <= state.order.length) {
     const taskId = state.order[state.next - 1];
     const repo = state.byId.get(taskId).repo;
@@ -129,6 +133,77 @@ export function nextAction(state) {
   }
   if (!state.secondSet) return { action: "draw-second", tasks: secondSubset(state) };
   return { action: "done", accepted: state.accepted.length, n: state.n, unmet: state.accepted.length < state.n };
+}
+
+// The second reader's response. It marks the task out only when it says out and names
+// exactly one code on the list; anything else (an unknown code, a refusal, extra
+// decisions) does not, and is recorded as no decision.
+export function parseModelDecision(text) {
+  const body = String(text ?? "").trim();
+  const codes = Object.keys(REASONS).filter((code) => new RegExp(`(^|[^a-z-])${code}([^a-z-]|$)`, "i").test(body));
+  if (/^`?out\b/i.test(body) && codes.length === 1) return { decision: "out", reason: codes[0] };
+  if (/^`?in`?\s*$/i.test(body)) return { decision: "in" };
+  return { decision: "none" };
+}
+
+export const PROMPT_PATH = new URL("../prompts/second-reader.md", import.meta.url);
+
+// The second reader's prompt: the fixed list and the task, nothing of the author's.
+export function secondPrompt(template, instance) {
+  const reasons = Object.entries(REASONS).map(([code, text]) => `- ${code}: ${text}`).join("\n");
+  const task = [
+    "<<<TASK",
+    `Repository: ${instance.repo}`,
+    "",
+    "The issue:",
+    instance.problem_statement,
+    "",
+    "The tests that judge a fix (they fail before the change and pass after it):",
+    instance.FAIL_TO_PASS.join("\n"),
+    "",
+    "The test change:",
+    instance.test_patch,
+    "",
+    "The fixing change:",
+    instance.patch,
+    "TASK>>>",
+  ].join("\n");
+  return template.replace("{{REASONS}}", reasons).replace("{{TASK}}", task);
+}
+
+// The registered second reader, from the environment.
+export function secondReaderConfig(env, promptText) {
+  const config = { url: env.SECOND_READER_URL ?? "", model: env.SECOND_READER_MODEL ?? "", prompt_sha256: createHash("sha256").update(promptText).digest("hex") };
+  if (!/^https:\/\//.test(config.url) || !config.model) throw new Error("SECOND_READER_URL and SECOND_READER_MODEL must name the registered second reader");
+  if (/anthropic|claude/i.test(`${config.url} ${config.model}`)) throw new Error("the second reader's vendor is not Anthropic");
+  return config;
+}
+
+// One call, temperature 0. A transport failure (no response, 429 or 5xx) may be retried;
+// a completed response is the decision and is never rerun.
+async function askSecondReader(config, prompt, key, fetchImpl = fetch) {
+  for (let attempt = 0; ; attempt++) {
+    let response;
+    try {
+      response = await fetchImpl(config.url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: config.model, temperature: 0, messages: [{ role: "user", content: prompt }] }),
+      });
+    } catch (err) {
+      if (attempt < 5) {
+        await new Promise((r) => setTimeout(r, 5000 * 2 ** attempt));
+        continue;
+      }
+      throw err;
+    }
+    if ((response.status === 429 || response.status >= 500) && attempt < 5) {
+      await new Promise((r) => setTimeout(r, 5000 * 2 ** attempt));
+      continue;
+    }
+    if (!response.ok) throw new Error(`the second reader answered ${response.status}`);
+    return response.text();
+  }
 }
 
 // A reader's comment: `in`, or `out <code>` followed by the quoted reason.
@@ -215,7 +290,7 @@ async function main() {
   const [command, ...rest] = process.argv.slice(2);
   const { values } = parseArgs({
     args: rest,
-    options: Object.fromEntries(["frame", "repos", "dir", "beacon", "registration", "n", "repo", "issue", "commenter", "body-file", "author", "second-reader"].map((k) => [k, { type: "string" }])),
+    options: Object.fromEntries(["frame", "repos", "dir", "beacon", "registration", "n", "repo", "issue", "commenter", "body-file", "author"].map((k) => [k, { type: "string" }])),
   });
   const dir = values.dir ?? ".";
   const logPath = join(dir, "log.jsonl");
@@ -226,7 +301,8 @@ async function main() {
     const beacon = JSON.parse(readFileSync(values.beacon, "utf8"));
     if (!/^[0-9a-f]{64}$/.test(beacon.randomness ?? "") || !beacon.t) throw new Error("start needs the registered round from scripts/seed.mjs --t");
     if (!/^[1-9]\d*$/.test(values.n ?? "") || !/^[0-9a-f]{64}$/.test(values.registration ?? "")) throw new Error("start needs a positive --n and the registration's --registration sha256");
-    const record = { event: "start", seed: beacon.randomness, n: Number(values.n), cap: REPO_CAP, frame_sha256: FRAME_SHA256, registration_sha256: values.registration, beacon };
+    const second_reader = secondReaderConfig(process.env, readFileSync(PROMPT_PATH));
+    const record = { event: "start", seed: beacon.randomness, n: Number(values.n), cap: REPO_CAP, frame_sha256: FRAME_SHA256, registration_sha256: values.registration, beacon, second_reader };
     if (log.length) {
       const same = ["seed", "n", "registration_sha256"].every((k) => log[0][k] === record[k]);
       if (!same) throw new Error("the walk has already started with another seed, N or registration");
@@ -254,6 +330,21 @@ async function main() {
       append(dir, record);
       return console.log(JSON.stringify({ ...next, event: record.event, reason: record.reason }));
     }
+    if (next.action === "second-read") {
+      // No substitution: the reader must be the one frozen at the start.
+      const template = readFileSync(PROMPT_PATH, "utf8");
+      const config = secondReaderConfig(process.env, template);
+      if (JSON.stringify(config) !== JSON.stringify(log[0].second_reader)) throw new Error("the second reader is not the one frozen at the start");
+      const instance = JSON.parse(readFileSync(join(dir, "instances", `${next.task_id}.json`), "utf8"));
+      const raw = await askSecondReader(config, secondPrompt(template, instance), process.env.SECOND_READER_KEY);
+      let content = null;
+      try {
+        content = JSON.parse(raw).choices?.[0]?.message?.content ?? null;
+      } catch {}
+      const parsed = parseModelDecision(content);
+      append(dir, { event: "audit", reader: "second", position: next.position, task_id: next.task_id, ...parsed, raw, raw_sha256: createHash("sha256").update(raw).digest("hex"), model: config.model, prompt_sha256: config.prompt_sha256 });
+      return console.log(JSON.stringify({ ...next, ...parsed }));
+    }
     return console.log(JSON.stringify(next));
   }
 
@@ -261,7 +352,7 @@ async function main() {
     // One issue per open audit, opened once; the log records its number.
     const frame = JSON.parse(readFileSync(values.frame, "utf8"));
     const state = replay(frame.candidates, log);
-    const due = [...state.pendingAuthor.map((id) => ["author", id]), ...state.pendingSecond.map((id) => ["second", id])];
+    const due = state.pendingAuthor.map((id) => ["author", id]);
     for (const [reader, id] of due) {
       if (state.opened.some((r) => r.reader === reader && r.task_id === id)) continue;
       const instance = JSON.parse(readFileSync(join(dir, "instances", `${id}.json`), "utf8"));
@@ -279,8 +370,7 @@ async function main() {
     const opened = log.filter((r) => r.event === "audit opened" && r.issue === issue).at(-1);
     if (!opened) return console.log(JSON.stringify({ recorded: false, why: "not an audit issue" }));
     if (log.some((r) => r.event === "audit" && r.reader === opened.reader && r.task_id === opened.task_id)) return console.log(JSON.stringify({ recorded: false, why: "already recorded" }));
-    const allowed = opened.reader === "author" ? values.author : values["second-reader"];
-    if (!allowed || values.commenter.toLowerCase() !== allowed.toLowerCase()) return console.log(JSON.stringify({ recorded: false, why: "not this audit's reader" }));
+    if (!values.author || values.commenter.toLowerCase() !== values.author.toLowerCase()) return console.log(JSON.stringify({ recorded: false, why: "not this audit's reader" }));
     const parsed = parseDecision(readFileSync(values["body-file"], "utf8"));
     if (!parsed) return console.log(JSON.stringify({ recorded: false, why: "malformed", reply: true }));
     append(dir, { event: "audit", reader: opened.reader, position: opened.position, task_id: opened.task_id, issue, ...parsed });

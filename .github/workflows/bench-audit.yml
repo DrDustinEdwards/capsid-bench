@@ -1,9 +1,9 @@
 name: bench-audit
 
 # Records a reader's audit decision (protocol section 4, "Audit") from a comment on an
-# audit issue that bench-walk.yml opened, then carries the walk on. Only the issue's
-# reader counts: the repository owner for the author's audits, the SECOND_READER variable
-# for the second reader's. The first valid comment is recorded on the `walk` branch and
+# audit issue that bench-walk.yml opened, then carries the walk on. Only the author (the
+# repository owner) answers these; the second reader is a model the walk calls itself.
+# The first valid comment is recorded on the `walk` branch and
 # closes the issue; a malformed one gets a reply and is not recorded.
 
 on:
@@ -49,7 +49,6 @@ jobs:
           ISSUE: ${{ github.event.issue.number }}
           COMMENTER: ${{ github.event.comment.user.login }}
           AUTHOR: ${{ github.repository_owner }}
-          SECOND_READER: ${{ vars.SECOND_READER }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
@@ -60,7 +59,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           printf '%s' "${BODY}" > "${RUNNER_TEMP}/comment.txt"
-          out="$(node ../scripts/walk.mjs record --dir . --issue "${ISSUE}" --commenter "${COMMENTER}" --body-file "${RUNNER_TEMP}/comment.txt" --author "${AUTHOR}" --second-reader "${SECOND_READER}")"
+          out="$(node ../scripts/walk.mjs record --dir . --issue "${ISSUE}" --commenter "${COMMENTER}" --body-file "${RUNNER_TEMP}/comment.txt" --author "${AUTHOR}")"
           echo "${out}"
           recorded="$(echo "${out}" | jq -r .recorded)"
           echo "recorded=${recorded}" >> "$GITHUB_OUTPUT"
@@ -79,3 +78,4 @@ jobs:
       contents: write
       issues: write
     uses: ./.github/workflows/bench-walk.yml
+    secrets: inherit

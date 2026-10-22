@@ -27,6 +27,10 @@ permissions:
   issues: write
 
 env:
+  # The second reader (protocol, "Second reader"): a model from another vendor, frozen in
+  # the walk's start record with the prompt's hash.
+  SECOND_READER_URL: ${{ vars.SECOND_READER_URL }}
+  SECOND_READER_MODEL: ${{ vars.SECOND_READER_MODEL }}
   # SWE-rebench/SWE-bench-fork, the harness the dataset's recipes are written for.
   HARNESS: git+https://github.com/SWE-rebench/SWE-bench-fork@e4907b7a90eafaa1f0a6428fd04fe31cdd8b4284
 
@@ -89,6 +93,7 @@ jobs:
         id: walk
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          SECOND_READER_KEY: ${{ secrets.SECOND_READER_KEY }}
         run: |
           set -euo pipefail
           # Start no candidate with less than 90 minutes of the job left.
