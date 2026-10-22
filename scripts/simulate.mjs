@@ -64,14 +64,22 @@ export function synthetic(n, scenario, random) {
     tasks.push({ task_id, repo: `sample/repo-${repo}`, split: "full", fail_to_pass_count: 1, pass_to_pass_count: 1 });
     draw.push({ position: i, task_id });
     const lose = random() < LOSS ? Math.floor(random() * 6) : -1;
-    let slot = 0;
+    const rates = {};
     for (const arm of ["baseline", "treatment"]) {
       const shift = arm === "treatment" ? scenario : { b: 0, resolved: 0 };
-      const pr = beta(Math.min(0.99, Math.max(0.01, scenario.base.resolved + shift.resolved)), random);
-      const pb = beta(Math.min(0.99, Math.max(0.01, scenario.base.b + shift.b)), random);
-      for (let k = 0; k < 3; k++, slot++) {
+      rates[arm] = {
+        pr: beta(Math.min(0.99, Math.max(0.01, scenario.base.resolved + shift.resolved)), random),
+        pb: beta(Math.min(0.99, Math.max(0.01, scenario.base.b + shift.b)), random),
+      };
+    }
+    // The registered order: baseline, treatment, baseline, treatment, baseline, treatment.
+    let slot = 0;
+    for (let k = 0; k < 3; k++) {
+      for (const arm of ["baseline", "treatment"]) {
+        const { pr, pb } = rates[arm];
         const at = () => new Date((clock += 60 * 1000)).toISOString();
         if (slot === lose) {
+          slot++;
           // Two unjudged attempts: the slot has no scored run.
           for (let t = 0; t < 2; t++) {
             const when = at();
@@ -84,6 +92,7 @@ export function synthetic(n, scenario, random) {
         const b = !resolved && random() < Math.min(1, pb / Math.max(1e-9, 1 - pr));
         const when = at();
         runs.push({ task_id, arm, status: "scored", started_at: when, finished_at: when, claimed_done: resolved || b ? 1 : 0, fail_to_pass_passed: resolved ? 1 : 0, pass_to_pass_passed: 1, report: "{}" });
+        slot++;
       }
     }
   }
@@ -110,7 +119,7 @@ export function simulate({ reps, resamples, seed, sizes = [120, 160] }) {
       let confirmatory = 0;
       for (let r = 0; r < reps; r++) {
         const { data, accepted, audit } = synthetic(n, scenario, random);
-        const result = analyze(data, { n: 1, accepted, audit, seed: `${seed}:${n}:${name}:${r}`, resamples });
+        const result = analyze(data, { accepted, audit, seed: `${seed}:${n}:${name}:${r}`, resamples });
         if (/treatment is favoured/.test(result.sentence)) favoured++;
         if (!/not confirmatory|Below the floor/i.test(result.sentence)) confirmatory++;
       }

@@ -120,7 +120,7 @@ test("unseal opens a run whose checks pass and marks one that fails as missing",
 test("the analysis refuses an export with a sealed run still closed, and a missing run ends its slot empty", async () => {
   const { analyze, slots } = await import("../scripts/analyze.mjs");
   const run = { id: "bench_a", task_id: "t", arm: "baseline", status: "scored", report: JSON.stringify({ sealed: { sha256: "a".repeat(64), log_index: 1 } }) };
-  assert.throws(() => analyze({ tasks: [], draw: [], runs: [run] }, { n: 1, accepted: [], audit: [] }), /still sealed/);
+  assert.throws(() => analyze({ tasks: [], draw: [], runs: [run] }, { accepted: [], audit: [] }), /still sealed/);
   const scored = { status: "scored", report: "{}" };
   assert.deepEqual(slots([{ status: "missing", report: "{}" }, scored], new Set()), [null, scored]);
 });

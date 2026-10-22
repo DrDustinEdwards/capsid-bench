@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fenced, nextAction, parseDecision, parseModelDecision, permutation, replay, secondPrompt, secondReaderConfig } from "../scripts/walk.mjs";
+import { auditBody, fenced, nextAction, parseDecision, parseModelDecision, permutation, replay, secondPrompt, secondReaderConfig } from "../scripts/walk.mjs";
 
 // The walk (protocol section 4, "Audit" and "Draw") replayed from hand-made logs over a
 // fake frame: repositories in the "sample" namespace.
@@ -12,7 +12,7 @@ const at = (i) => ({ position: i + 1, task_id: order[i], repo: frame.find((c) =>
 const pass = (i) => ({ ...at(i), event: "gates passed" });
 const audit = (i, reader, decision) => ({ ...at(i), event: "audit", reader, decision, ...(decision === "out" ? { reason: "ambiguous", quote: "x" } : {}) });
 // Both readers' decisions on one candidate that passed the gates.
-const both = (i, author, second = "in") => [pass(i), audit(i, "second", second), audit(i, "author", author)];
+const both = (i, author, second = "in") => [pass(i), audit(i, "author", author), audit(i, "second", second)];
 
 test("the permutation is fixed by the seed and keeps every candidate", () => {
   assert.deepEqual(permutation(["x", "y", "z", "w"], "s"), permutation(["x", "y", "z", "w"], "s"));
@@ -20,11 +20,10 @@ test("the permutation is fixed by the seed and keeps every candidate", () => {
   assert.deepEqual([...order].sort(), frame.map((c) => c.task_id).sort());
 });
 
-test("the walk starts at the first position, and each pass goes to the second reader and then waits for the author", () => {
+test("the walk starts at the first position, and each pass waits for the author before the second reader", () => {
   assert.deepEqual(nextAction(replay(frame, [start(3)])), { action: "validate", position: 1, task_id: order[0], repo: at(0).repo });
-  assert.deepEqual(nextAction(replay(frame, [start(3), pass(0)])), { action: "second-read", task_id: order[0], position: 1 });
-  const waiting = nextAction(replay(frame, [start(3), pass(0), audit(0, "second", "in")]));
-  assert.deepEqual(waiting, { action: "wait", reader: "author", tasks: [order[0]] });
+  assert.deepEqual(nextAction(replay(frame, [start(3), pass(0)])), { action: "wait", reader: "author", tasks: [order[0]] });
+  assert.deepEqual(nextAction(replay(frame, [start(3), pass(0), audit(0, "author", "in")])), { action: "second-read", task_id: order[0], position: 1 });
   // An excluded candidate needs no audit: the walk goes on.
   assert.equal(nextAction(replay(frame, [start(3), { ...at(0), event: "excluded", reason: "build failed" }])).position, 2);
   assert.equal(nextAction(replay(frame, [start(3), ...both(0, "out")])).position, 2);
@@ -109,4 +108,11 @@ test("the second reader's prompt holds the list and the packet but never the gol
   assert.throws(() => secondReaderConfig({ SECOND_READER_URL: "https://example.com/v1", SECOND_READER_MODEL: "claude-x" }, "p"));
   assert.throws(() => secondReaderConfig({}, "p"));
   assert.equal(secondReaderConfig({ SECOND_READER_URL: "https://example.com/v1", SECOND_READER_MODEL: "m" }, "p").prompt_sha256.length, 64);
+});
+
+test("the author's packet is the second reader's: the issue and the tests, never the gold patch", () => {
+  const body = auditBody({ repo: "sample/a", problem_statement: "It breaks.", FAIL_TO_PASS: ["t1"], test_patch: "+t", patch: "+gold" }, "https://example.com/i.json");
+  assert.match(body, /It breaks\./);
+  assert.match(body, /t1/);
+  assert.doesNotMatch(body, /gold/i);
 });

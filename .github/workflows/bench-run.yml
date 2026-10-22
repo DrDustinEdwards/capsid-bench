@@ -58,6 +58,9 @@ env:
   PHASE1_MINUTES: 36
   PHASE2_TURNS: 20
   PHASE2_MINUTES: 9
+  # Set, not left to a default (protocol section 5, decided 2026-10-22): Claude Code's own
+  # default for Sonnet 5.5 is medium and the API's is high, so a blank would be ambiguous.
+  EFFORT: high
   CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
   SWE_HARNESS_REF: ${{ vars.SWE_HARNESS_REF }}
   CAPSID_URL: https://mcp.dustinedwards.info
@@ -249,7 +252,7 @@ jobs:
           timeout "${PHASE1_MINUTES}m" docker exec "${ARGS[@]}" -w /testbed task \
             claude -p "$(cat "${RUNNER_TEMP}/first.md")" \
               --append-system-prompt "$(cat "${RUNNER_TEMP}/system.md")" "${MCP[@]+"${MCP[@]}"}" \
-              --model "${MODEL}" --max-turns "${PHASE1_TURNS}" --output-format json --dangerously-skip-permissions \
+              --model "${MODEL}" --effort "${EFFORT}" --max-turns "${PHASE1_TURNS}" --output-format json --dangerously-skip-permissions \
             > "${RUNNER_TEMP}/turn1.json"
           code=$?
           [ "${code}" = 0 ] || echo "phase one exited ${code}"
@@ -305,7 +308,7 @@ jobs:
           timeout "${PHASE2_MINUTES}m" docker exec "${ARGS[@]}" -w /testbed task \
             claude -p "$(cat "${RUNNER_TEMP}/verifier.md")" --resume "${SESSION}" \
               --append-system-prompt "$(cat "${RUNNER_TEMP}/system.md")" "${MCP[@]+"${MCP[@]}"}" \
-              --model "${MODEL}" --max-turns "${PHASE2_TURNS}" --output-format json --dangerously-skip-permissions \
+              --model "${MODEL}" --effort "${EFFORT}" --max-turns "${PHASE2_TURNS}" --output-format json --dangerously-skip-permissions \
             > "${RUNNER_TEMP}/turn2.json"
           code=$?
           [ "${code}" = 0 ] || echo "phase two exited ${code}"
