@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fenced, nextAction, parseDecision, permutation, replay, secondSubset } from "../scripts/walk.mjs";
+import { fenced, nextAction, parseDecision, parseModelDecision, permutation, replay, secondPrompt, secondReaderConfig, secondSubset } from "../scripts/walk.mjs";
 
 // The walk (protocol section 4, "Audit" and "Draw") replayed from hand-made logs over a
 // fake frame: repositories in the "sample" namespace.
@@ -54,7 +54,7 @@ test("at N the second reader's subset is drawn, and a removal reopens the walk",
   // Fewer than 20 audited: the second reader audits every one, in permutation order.
   assert.deepEqual(drawn.tasks, [order[0], order[1], order[2]]);
   log.push({ event: "second reader set", tasks: drawn.tasks });
-  assert.deepEqual(nextAction(replay(frame, log)), { action: "wait", reader: "second", tasks: drawn.tasks });
+  assert.deepEqual(nextAction(replay(frame, log)), { action: "second-read", task_id: order[0], position: 1 });
   // The second reader takes one out: the walk resumes at the next position.
   log.push(audit(0, "second", "out"), audit(1, "second", "in"), audit(2, "second", "in"));
   assert.deepEqual(replay(frame, log).accepted, [order[2]]);
@@ -63,7 +63,7 @@ test("at N the second reader's subset is drawn, and a removal reopens the walk",
   assert.ok(!replay(frame, log).accepted.includes(order[1]));
   // A replacement goes to the author, then the second reader, before the walk is done.
   log.push(pass(3), audit(3, "author", "in"));
-  assert.deepEqual(nextAction(replay(frame, log)), { action: "wait", reader: "second", tasks: [order[3]] });
+  assert.deepEqual(nextAction(replay(frame, log)), { action: "second-read", task_id: order[3], position: 4 });
   log.push(audit(3, "second", "in"));
   assert.deepEqual(nextAction(replay(frame, log)), { action: "done", accepted: 2, n: 2, unmet: false });
 });
@@ -113,4 +113,23 @@ test("the seed's round is the quicknet round produced at T, or the last one befo
   assert.equal(roundTime(roundAt("2026-11-01T00:00:00Z")) <= Date.parse("2026-11-01T00:00:00Z") / 1000, true);
   assert.throws(() => roundAt("2026-11-01 00:00"));
   assert.equal(roundMessage(1).toString("hex"), "cd2662154e6d76b2b2b92e70c0cac3ccf534f9b74eb5b89819ec509083d00a50");
+});
+
+test("the second reader marks out only with out and exactly one listed code", () => {
+  assert.deepEqual(parseModelDecision("in"), { decision: "in" });
+  assert.deepEqual(parseModelDecision("`out ambiguous`"), { decision: "out", reason: "ambiguous" });
+  assert.deepEqual(parseModelDecision("out network-or-time"), { decision: "out", reason: "network-or-time" });
+  for (const text of ["out", "out unclear", "out ambiguous network-or-time", "I can't help with that.", "", null, "in, but ambiguous"]) {
+    assert.deepEqual(parseModelDecision(text), { decision: "none" }, String(text));
+  }
+});
+
+test("the second reader's prompt holds the list and the task, and its vendor is not Anthropic", () => {
+  const prompt = secondPrompt("{{REASONS}}\n{{TASK}}", { repo: "sample/a", problem_statement: "It breaks.", FAIL_TO_PASS: ["t1"], test_patch: "+t", patch: "+f" });
+  assert.match(prompt, /ambiguous: the issue is ambiguous/);
+  assert.match(prompt, /It breaks\.[\s\S]*t1[\s\S]*\+f\nTASK>>>$/);
+  assert.throws(() => secondReaderConfig({ SECOND_READER_URL: "https://api.anthropic.com/v1/messages", SECOND_READER_MODEL: "m" }, "p"));
+  assert.throws(() => secondReaderConfig({ SECOND_READER_URL: "https://example.com/v1", SECOND_READER_MODEL: "claude-x" }, "p"));
+  assert.throws(() => secondReaderConfig({}, "p"));
+  assert.equal(secondReaderConfig({ SECOND_READER_URL: "https://example.com/v1", SECOND_READER_MODEL: "m" }, "p").prompt_sha256.length, 64);
 });
