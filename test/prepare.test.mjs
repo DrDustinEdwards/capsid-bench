@@ -61,3 +61,14 @@ test("the leakage screen matches whole added lines, not punctuation", () => {
   assert.deepEqual(leakage("+++ b/x\n+}\n+  \n+);\n", "}\n);\n"), []);
   assert.deepEqual(leakage(DIFF, "x = compute(2) is the fix"), []);
 });
+
+test("the leakage screen also matches identifiers the gold patch introduces, as whole words", async () => {
+  const { addedIdentifiers, introducedIdentifiers } = await import("../scripts/prepare-candidate.mjs");
+  const patch = "+++ b/x.py\n+def parse_rows(maxRows):\n+    return helper_one(maxRows) + value\n";
+  assert.deepEqual(addedIdentifiers(patch), ["helper_one", "maxRows", "parse_rows"]);
+  // helper_one is already in the base tree, so the patch does not introduce it.
+  const introduced = introducedIdentifiers(patch, new Set(["helper_one"]));
+  assert.deepEqual(introduced, ["maxRows", "parse_rows"]);
+  assert.deepEqual(leakage(patch, "Add parse_rows for the CSV path.", introduced), ["identifier parse_rows"]);
+  assert.deepEqual(leakage(patch, "We call helper_one and parse rows by hand.", introduced), []);
+});

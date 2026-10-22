@@ -128,8 +128,10 @@ export async function prepare(gh, candidate, recipe) {
 
 // The leakage screen (protocol section 4, step 4): the task is excluded if any added,
 // non-blank line of the gold patch, other than a line made only of brackets or
-// punctuation, occurs as a whole line in the frozen issue, after trimming whitespace.
-export function leakage(patch, problem) {
+// punctuation, occurs as a whole line in the frozen issue, after trimming whitespace; or
+// if any identifier the gold patch introduces occurs in the issue as a whole word.
+// `introduced` is that list (see introducedIdentifiers).
+export function leakage(patch, problem, introduced = []) {
   const issueLines = new Set(problem.split(/\r?\n/).map((l) => l.trim()).filter(Boolean));
   const matches = [];
   for (const line of patch.split("\n")) {
@@ -138,7 +140,31 @@ export function leakage(patch, problem) {
     if (!text || /^[\p{P}\p{S}\s]*$/u.test(text)) continue;
     if (issueLines.has(text)) matches.push(text);
   }
+  const issueWords = new Set(problem.match(WORD) ?? []);
+  for (const name of introduced) if (issueWords.has(name)) matches.push(`identifier ${name}`);
   return matches;
+}
+
+const WORD = /[A-Za-z_][A-Za-z0-9_]*/g;
+// An identifier, as against an English word: it has an underscore, a digit, or a capital
+// letter after its first character (snake_case, name2, camelCase, PascalCase).
+const identifierLike = (word) => /[_0-9]/.test(word) || /[A-Z]/.test(word.slice(1));
+
+// The identifier-like names on the gold patch's added lines.
+export function addedIdentifiers(patch) {
+  const names = new Set();
+  for (const line of patch.split("\n")) {
+    if (!line.startsWith("+") || line.startsWith("+++")) continue;
+    for (const word of line.slice(1).match(WORD) ?? []) if (identifierLike(word)) names.add(word);
+  }
+  return [...names].sort();
+}
+
+// The names the gold patch introduces: added names that occur on no line of the base tree.
+// `inBase` is the set of those names found in the base tree (the walk greps an archive of
+// the repository at the base commit).
+export function introducedIdentifiers(patch, inBase) {
+  return addedIdentifiers(patch).filter((name) => !inBase.has(name));
 }
 
 async function main() {

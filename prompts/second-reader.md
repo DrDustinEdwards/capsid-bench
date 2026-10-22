@@ -1,4 +1,4 @@
-You are auditing one benchmark task against a fixed exclusion list. The task is a GitHub issue, the tests that will judge a fix, and the change that fixed it. Decide whether any reason on the list applies.
+You are auditing one benchmark task against a fixed exclusion list. The task is a GitHub issue and the tests that will judge a fix. Decide whether any reason on the list applies.
 
 The fixed exclusion list, by code:
 {{REASONS}}

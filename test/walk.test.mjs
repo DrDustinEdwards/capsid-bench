@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fenced, nextAction, parseDecision, parseModelDecision, permutation, replay, secondPrompt, secondReaderConfig, secondSubset } from "../scripts/walk.mjs";
+import { fenced, nextAction, parseDecision, parseModelDecision, permutation, replay, secondPrompt, secondReaderConfig } from "../scripts/walk.mjs";
 
 // The walk (protocol section 4, "Audit" and "Draw") replayed from hand-made logs over a
 // fake frame: repositories in the "sample" namespace.
@@ -11,6 +11,8 @@ const order = permutation(frame.map((c) => c.task_id), "seed-1");
 const at = (i) => ({ position: i + 1, task_id: order[i], repo: frame.find((c) => c.task_id === order[i]).repo });
 const pass = (i) => ({ ...at(i), event: "gates passed" });
 const audit = (i, reader, decision) => ({ ...at(i), event: "audit", reader, decision, ...(decision === "out" ? { reason: "ambiguous", quote: "x" } : {}) });
+// Both readers' decisions on one candidate that passed the gates.
+const both = (i, author, second = "in") => [pass(i), audit(i, "second", second), audit(i, "author", author)];
 
 test("the permutation is fixed by the seed and keeps every candidate", () => {
   assert.deepEqual(permutation(["x", "y", "z", "w"], "s"), permutation(["x", "y", "z", "w"], "s"));
@@ -18,13 +20,14 @@ test("the permutation is fixed by the seed and keeps every candidate", () => {
   assert.deepEqual([...order].sort(), frame.map((c) => c.task_id).sort());
 });
 
-test("the walk starts at the first position and waits on each pass for the author", () => {
+test("the walk starts at the first position, and each pass goes to the second reader and then waits for the author", () => {
   assert.deepEqual(nextAction(replay(frame, [start(3)])), { action: "validate", position: 1, task_id: order[0], repo: at(0).repo });
-  const waiting = nextAction(replay(frame, [start(3), pass(0)]));
+  assert.deepEqual(nextAction(replay(frame, [start(3), pass(0)])), { action: "second-read", task_id: order[0], position: 1 });
+  const waiting = nextAction(replay(frame, [start(3), pass(0), audit(0, "second", "in")]));
   assert.deepEqual(waiting, { action: "wait", reader: "author", tasks: [order[0]] });
   // An excluded candidate needs no audit: the walk goes on.
   assert.equal(nextAction(replay(frame, [start(3), { ...at(0), event: "excluded", reason: "build failed" }])).position, 2);
-  assert.equal(nextAction(replay(frame, [start(3), pass(0), audit(0, "author", "out")])).position, 2);
+  assert.equal(nextAction(replay(frame, [start(3), ...both(0, "out")])).position, 2);
 });
 
 test("a candidate is skipped once its repository has 2 accepted tasks", () => {
@@ -41,52 +44,25 @@ test("a candidate is skipped once its repository has 2 accepted tasks", () => {
     }
     assert.equal(next.action, "validate");
     seen.set(repo, (seen.get(repo) ?? 0) + 1);
-    log.push(pass(i), audit(i, "author", "in"));
+    log.push(...both(i, "in"));
   }
   assert.ok(log.some((r) => r.event === "skipped"));
   assert.equal(replay(frame, log).accepted.length, 7);
 });
 
-test("at N the second reader's subset is drawn, and a removal reopens the walk", () => {
-  const log = [start(2), pass(0), audit(0, "author", "in"), pass(1), audit(1, "author", "out"), pass(2), audit(2, "author", "in")];
-  const drawn = nextAction(replay(frame, log));
-  assert.equal(drawn.action, "draw-second");
-  // Fewer than 20 audited: the second reader audits every one, in permutation order.
-  assert.deepEqual(drawn.tasks, [order[0], order[1], order[2]]);
-  log.push({ event: "second reader set", tasks: drawn.tasks });
-  assert.deepEqual(nextAction(replay(frame, log)), { action: "second-read", task_id: order[0], position: 1 });
-  // The second reader takes one out: the walk resumes at the next position.
-  log.push(audit(0, "second", "out"), audit(1, "second", "in"), audit(2, "second", "in"));
+test("either reader's out keeps a task out of the accepted set and off its repository's cap", () => {
+  const log = [start(2), ...both(0, "in", "out"), ...both(1, "out", "in"), ...both(2, "in")];
   assert.deepEqual(replay(frame, log).accepted, [order[2]]);
   assert.equal(nextAction(replay(frame, log)).position, 4);
-  // The second reader cannot bring the author's reject back in.
-  assert.ok(!replay(frame, log).accepted.includes(order[1]));
-  // A replacement goes to the author, then the second reader, before the walk is done.
-  log.push(pass(3), audit(3, "author", "in"));
-  assert.deepEqual(nextAction(replay(frame, log)), { action: "second-read", task_id: order[3], position: 4 });
-  log.push(audit(3, "second", "in"));
+  // A non-marking response leaves the author's accept standing.
+  log.push(...both(3, "in", "none"));
+  assert.deepEqual(replay(frame, log).accepted, [order[2], order[3]]);
   assert.deepEqual(nextAction(replay(frame, log)), { action: "done", accepted: 2, n: 2, unmet: false });
 });
 
 test("an exhausted permutation ends the walk with N unmet", () => {
   const log = [start(20), ...order.map((_, i) => ({ ...at(i), event: "excluded", reason: "did not fail before" }))];
-  assert.equal(nextAction(replay(frame, log)).action, "draw-second");
-  log.push({ event: "second reader set", tasks: [] });
   assert.deepEqual(nextAction(replay(frame, log)), { action: "done", accepted: 0, n: 20, unmet: true });
-});
-
-test("the second reader's subset is 10 and 10, filled from the other group when one is short", () => {
-  const ids = (p, k) => Array.from({ length: k }, (_, i) => `${p}${i}`);
-  const state = (inn, out) => ({ seed: "s", order: [...inn, ...out], authorIn: inn, authorOut: out });
-  const count = (picked, p) => picked.filter((id) => id.startsWith(p)).length;
-  const even = secondSubset(state(ids("i", 30), ids("o", 30)));
-  assert.equal(count(even, "i"), 10);
-  assert.equal(count(even, "o"), 10);
-  const short = secondSubset(state(ids("i", 30), ids("o", 4)));
-  assert.equal(count(short, "i"), 16);
-  assert.equal(count(short, "o"), 4);
-  assert.equal(secondSubset(state(ids("i", 12), ids("o", 5))).length, 17);
-  assert.deepEqual(secondSubset(state(ids("i", 30), ids("o", 30))), even);
 });
 
 test("a reader's comment is in, or out with a listed code and a quote", () => {
@@ -124,10 +100,11 @@ test("the second reader marks out only with out and exactly one listed code", ()
   }
 });
 
-test("the second reader's prompt holds the list and the task, and its vendor is not Anthropic", () => {
-  const prompt = secondPrompt("{{REASONS}}\n{{TASK}}", { repo: "sample/a", problem_statement: "It breaks.", FAIL_TO_PASS: ["t1"], test_patch: "+t", patch: "+f" });
+test("the second reader's prompt holds the list and the packet but never the gold patch, and its vendor is not Anthropic", () => {
+  const prompt = secondPrompt("{{REASONS}}\n{{TASK}}", { repo: "sample/a", problem_statement: "It breaks.", FAIL_TO_PASS: ["t1"], test_patch: "+t", patch: "+gold" });
   assert.match(prompt, /ambiguous: the issue is ambiguous/);
-  assert.match(prompt, /It breaks\.[\s\S]*t1[\s\S]*\+f\nTASK>>>$/);
+  assert.match(prompt, /It breaks\.[\s\S]*t1[\s\S]*\+t\nTASK>>>$/);
+  assert.doesNotMatch(prompt, /gold|fixing change/);
   assert.throws(() => secondReaderConfig({ SECOND_READER_URL: "https://api.anthropic.com/v1/messages", SECOND_READER_MODEL: "m" }, "p"));
   assert.throws(() => secondReaderConfig({ SECOND_READER_URL: "https://example.com/v1", SECOND_READER_MODEL: "claude-x" }, "p"));
   assert.throws(() => secondReaderConfig({}, "p"));

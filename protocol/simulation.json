@@ -1,0 +1,70 @@
+{
+  "reps": 1000,
+  "resamples": 2000,
+  "seed": "capsid-bench-sim",
+  "icc": 0.1,
+  "two_task_share": 0.35,
+  "loss": 0.03,
+  "results": [
+    {
+      "n": 120,
+      "scenario": "null",
+      "favoured": 0.001,
+      "confirmatory": 0.029
+    },
+    {
+      "n": 120,
+      "scenario": "b_minus_10",
+      "favoured": 0.021,
+      "confirmatory": 0.028
+    },
+    {
+      "n": 120,
+      "scenario": "b_minus_10_resolution_minus_10",
+      "favoured": 0.001,
+      "confirmatory": 0.024
+    },
+    {
+      "n": 120,
+      "scenario": "b_minus_5",
+      "favoured": 0.007,
+      "confirmatory": 0.031
+    },
+    {
+      "n": 120,
+      "scenario": "b_minus_10_low_resolution",
+      "favoured": 0.019,
+      "confirmatory": 0.023
+    },
+    {
+      "n": 160,
+      "scenario": "null",
+      "favoured": 0.026,
+      "confirmatory": 1
+    },
+    {
+      "n": 160,
+      "scenario": "b_minus_10",
+      "favoured": 0.786,
+      "confirmatory": 1
+    },
+    {
+      "n": 160,
+      "scenario": "b_minus_10_resolution_minus_10",
+      "favoured": 0.022,
+      "confirmatory": 1
+    },
+    {
+      "n": 160,
+      "scenario": "b_minus_5",
+      "favoured": 0.363,
+      "confirmatory": 1
+    },
+    {
+      "n": 160,
+      "scenario": "b_minus_10_low_resolution",
+      "favoured": 0.85,
+      "confirmatory": 1
+    }
+  ]
+}
