@@ -162,5 +162,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     result = { environment: { ok: false, reason: `the scorer threw: ${err instanceof Error ? err.message : String(err)}` } };
   }
   writeFileSync(out, JSON.stringify(result));
-  console.log(JSON.stringify({ environment: result.environment, hidden: result.hidden ?? null }));
+  // The log is public (bench-run.yml, "PUBLIC REPOSITORY"), so it never shows a result.
+  console.log(JSON.stringify({ environment: result.environment }));
 }

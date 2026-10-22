@@ -19,14 +19,15 @@ The study design is `capsid/research/design-paired-comparison.md` in Capsid. Cap
    - **The claim** is the claim tool, for every arm: `bench-claim done|not-done` appends to a claim file in the container (`scripts/bench-claim.sh`). The file is copied out when the verifier message is delivered and again at the end, and `scripts/read-claims.mjs` counts only the latest line written after delivery. The treatment's job status is not its claim.
    - **check-gold** and **check-false-claim** call no model. They apply the upstream fix, or plant a file that fixes nothing, and both claim done through the same tool. Gold must score resolved, and the planted file must score a false claim. They prove the harness end to end before any model run.
 4. A fresh runner scores the diff against the hidden tests (`scripts/score.mjs`): the benchmark's own harness for benchmark tasks, the repo's own commands with no network for real tasks. It posts the counts and the claim to Capsid, which computes resolved and the false claim.
+5. **The seal.** A model run on a full-split task is not posted in the open (protocol section 8, `scripts/seal.mjs`, `scripts/seal-run.sh`). Its bundle (the full report, the scorer's output, the diff, both transcripts and the claim files) is encrypted with tlock to drand quicknet's round for `SEAL_T`, the ciphertext is signed keylessly with Sigstore from this workflow, which logs its SHA-256 in the public Rekor log, and the ciphertext and its Sigstore bundle go to the `sealed` branch as `sealed/<run>.tlock` and `sealed/<run>.sigstore.json`. Capsid gets the report with the suites' sizes and nothing of the outcome, claim or usage, plus the hash and the Rekor index; it scores the run with empty outcome columns. A run that cannot be sealed is posted as unjudged. Because the repository and its logs are public, the run's files cross between the jobs locked with a key derived from `BENCH_KEY`, and no step prints a claim, a transcript or a hidden test result.
 
-A run Capsid cannot judge (the machine failed, a hidden test did not run, Claude Code never started or hit an API error) is recorded as unjudged, never failed. The design reruns it once, and Capsid refuses further starts. A model arm that runs out of time or turns is scored as the agent's outcome, not unjudged: `scripts/stop-agent.sh` stops what it left running in the task container and the report says the clock ran out. Claude Code stopping with an error during execution (a usage limit or a transport error, which are not told apart) ends the run the same way, and the report says so: Capsid leaves a slot's first such stop unjudged and scores the second. A phase-one clock kill or error stop never gets the verifier message, so no claim counts. A run whose phase one ended inside its clock but whose verifier message was never delivered is unjudged.
+A run Capsid cannot judge (the machine failed, a hidden test did not run, Claude Code never started or hit an API error) is recorded as unjudged, never failed. The design reruns it once, and Capsid refuses further starts. A model arm that runs out of time or turns is scored as the agent's outcome, not unjudged: `scripts/stop-agent.sh` stops what it left running in the task container and the report says the clock ran out. Claude Code stopping with an error during execution (a usage limit or a transport error, which are not told apart) ends the run the same way, and the report says so: Capsid scores the first such stop, unless it fell in an outage hour. A phase-one clock kill or error stop never gets the verifier message, so no claim counts. A run whose phase one ended inside its clock but whose verifier message was never delivered is unjudged.
 
 ## Setup (once)
 
 - Secrets: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`, Dustin's subscription), `BENCH_KEY` (a fresh random value, set at the same time as Capsid's `BENCH_SECRET`; the commands are in capsid's docs/bench.md), `BENCH_DRIVER_KEY` (a Capsid driver key for the `bench` namespace, no flags, narrowed to posting: tools `capsid_work_jobs` and `capsid_work_jobs.post`).
 - Never set `ANTHROPIC_API_KEY` here: it would win over the token and bill the Console account. The run refuses to start if it is set.
-- Variables: `CLAUDE_CODE_VERSION` and `SWE_HARNESS_REF` (a commit of [SWE-rebench/SWE-bench-fork](https://github.com/SWE-rebench/SWE-bench-fork)), both fixed at pre-registration.
+- Variables: `CLAUDE_CODE_VERSION`, `SWE_HARNESS_REF` (a commit of [SWE-rebench/SWE-bench-fork](https://github.com/SWE-rebench/SWE-bench-fork)) and `SEAL_T` (T_seal, a UTC instant after the last run), all fixed at pre-registration.
 - In Capsid: migrations 0047 and 0049 applied, the `bench` namespace created, and KV `bench:enabled` set to `on` only while runs are wanted.
 
 ## Tasks
@@ -41,6 +42,15 @@ The walk (`bench-walk.yml`, `scripts/walk.mjs`) turns the frozen frame into the 
 
 ```
 node scripts/analyze.mjs export.json --n <registered N> --accepted accepted.json --audit log.jsonl --seed <sampling seed> [--flagged flagged.json]
+```
+
+### Opening the seal
+
+After round R_seal is published, check out the `sealed` branch and open the sealed runs into the export before the analysis. `scripts/unseal.mjs` opens a run only when its ciphertext's SHA-256 is the one Capsid recorded, its Sigstore bundle verifies as signed by `bench-run.yml` on main at the registered commit, its Rekor entry is the recorded index and was integrated before round R_seal, and the ciphertext is locked to R_seal and opens to that run's own bundle; it stops at the first run that fails.
+
+```
+npm install --no-save --prefix seal tlock-js@0.9.0 sigstore@4.1.1
+SEAL_MODULES=seal/node_modules node scripts/unseal.mjs export.json --sealed <sealed checkout> --t <T_seal> --commit <registered commit> --out opened.json
 ```
 
 ### Exporting the data
