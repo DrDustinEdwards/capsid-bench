@@ -5,7 +5,7 @@ name: bench-walk
 # needs an audit, the walk is done, or the time budget runs out, then opens one issue per
 # audit due. The log and the instances that passed both gates live on the `walk` branch,
 # committed after every step. Started by hand once with the registered T, N and registration hash, and
-# again by bench-audit.yml after each recorded audit. Calls no model and starts no run.
+# again by bench-audit.yml after each recorded audit. Calls the second reader; starts no arm run.
 
 on:
   workflow_dispatch:

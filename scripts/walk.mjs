@@ -1,15 +1,14 @@
 #!/usr/bin/env node
-// The walk (protocol section 4, "Audit" and "Draw", decided 2026-10-21): the frozen frame
-// permuted once with the registered seed, then each candidate in that order skipped at the
-// repository cap, or prepared, validated, leakage-screened and audited, until N tasks are
-// accepted or the permutation ends. Then the second reader's subset, and replacements for
-// any task either reader takes out.
+// The walk (protocol section 4, "Audit" and "Draw", decided 2026-10-21, collapsed
+// 2026-10-22): the frozen frame permuted once with the registered seed, then each candidate
+// in that order skipped at the repository cap, or prepared, validated, leakage-screened
+// and audited by both readers, until N tasks are accepted or the permutation ends.
 //
 // All state is one append-only log (log.jsonl on the `walk` branch), one record a line,
 // and the instances that passed both gates (instances/<task_id>.json). Everything below
 // is replayed from that log, so a rerun at any point picks up where the last record left
 // off. The walk is strictly in order: no candidate is considered until the one before it
-// is recorded, including the author's audit decision.
+// is recorded, including both readers' audit decisions.
 //
 //   node scripts/walk.mjs start --dir <walk dir> --beacon seed.json --n <registered N> --registration <sha256>
 //   node scripts/walk.mjs step --frame frame/candidates.json --repos frame/repos.json --dir <walk dir>
@@ -19,8 +18,8 @@
 //
 // `step` does one thing and prints it as JSON: { action, ... }. Actions: skip (repository
 // at the cap), validate (one candidate through preparation, validation and the leakage
-// screen), draw-second (the second reader's subset, fixed in the log), second-read (one
-// task put to the second reader), wait (an author audit is open) and done.
+// screen), second-read (one task put to the second reader), wait (an author audit is open)
+// and done.
 //
 // The second reader is a model from another vendor (protocol, "Second reader", decided
 // 2026-10-21), frozen in the start record: an OpenAI-compatible chat endpoint, the model
@@ -34,7 +33,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { REPO_CAP, rng } from "./analyze.mjs";
-import { github, leakage, prepare } from "./prepare-candidate.mjs";
+import { addedIdentifiers, github, introducedIdentifiers, leakage, prepare } from "./prepare-candidate.mjs";
 
 // The frozen frame (run 39487118514, frame/candidates.json). The walk refuses any other.
 export const FRAME_SHA256 = "68cbf6d3d73a3730e13aad43b2bfcb54df72cfaff2cee1a6e44930c567f006e";
@@ -46,8 +45,6 @@ export const REASONS = {
   "network-or-time": "the tests depend on network or time",
   ambiguous: "the issue is ambiguous between incompatible fixes",
 };
-
-export const SECOND_EACH = 10;
 
 // Fisher-Yates with the analysis script's seeded generator, over the frame's order.
 export function permutation(ids, seed) {
@@ -72,15 +69,9 @@ export function replay(candidates, log) {
   const of = (event, reader) => records.filter((r) => r.event === event && (!reader || r.reader === reader));
   const decision = (reader, id) => of("audit", reader).find((r) => r.task_id === id);
   const passed = of("gates passed");
-  const authorIn = passed.filter((r) => decision("author", r.task_id)?.decision === "in");
-  const authorOut = passed.filter((r) => decision("author", r.task_id)?.decision === "out");
-  const secondSet = of("second reader set")[0]?.tasks ?? null;
-  const drawnAt = of("second reader set")[0] ? log.indexOf(of("second reader set")[0]) : Infinity;
-  // Replacements: author accepts recorded after the subset was drawn join the second
-  // reader's set (the set grows only by them).
-  const replacements = authorIn.filter((r) => log.indexOf(decision("author", r.task_id)) > drawnAt).map((r) => r.task_id);
-  const secondTasks = secondSet ? [...secondSet, ...replacements] : [];
-  const accepted = authorIn.filter((r) => decision("second", r.task_id)?.decision !== "out").map((r) => r.task_id);
+  // A task is accepted when the author marks it in and the second reader does not mark it
+  // out. A task either reader marks out does not count toward its repository's cap.
+  const accepted = passed.filter((r) => decision("author", r.task_id)?.decision === "in" && decision("second", r.task_id) && decision("second", r.task_id).decision !== "out").map((r) => r.task_id);
   const considered = records.filter((r) => Number.isInteger(r.position)).reduce((m, r) => Math.max(m, r.position), 0);
   const perRepo = new Map();
   for (const id of accepted) perRepo.set(byId.get(id).repo, (perRepo.get(byId.get(id).repo) ?? 0) + 1);
@@ -91,47 +82,25 @@ export function replay(candidates, log) {
     byId,
     next: considered + 1,
     passed,
-    authorIn: authorIn.map((r) => r.task_id),
-    authorOut: authorOut.map((r) => r.task_id),
     pendingAuthor: passed.filter((r) => !decision("author", r.task_id)).map((r) => r.task_id),
-    secondSet,
-    pendingSecond: secondTasks.filter((id) => !decision("second", id)),
+    pendingSecond: passed.filter((r) => !decision("second", r.task_id)).map((r) => r.task_id),
     accepted,
     perRepo,
     opened: of("audit opened"),
   };
 }
 
-// The second reader's subset (protocol, "Audit"): 10 of the author's accepts and 10 of the
-// author's audit rejects drawn with the registered seed; a short group gives all of itself
-// and the rest comes from the other; fewer than 20 audited means all of them. Returned in
-// permutation order.
-export function secondSubset(state) {
-  const pick = (ids, salt) => permutation(ids, `${state.seed}:second reader:${salt}`);
-  const inn = pick(state.authorIn, "in");
-  const out = pick(state.authorOut, "out");
-  let chosen;
-  if (inn.length + out.length <= 2 * SECOND_EACH) chosen = [...inn, ...out];
-  else {
-    const takeIn = Math.min(inn.length, SECOND_EACH + Math.max(0, SECOND_EACH - out.length));
-    const takeOut = Math.min(out.length, 2 * SECOND_EACH - takeIn);
-    chosen = [...inn.slice(0, takeIn), ...out.slice(0, takeOut)];
-  }
-  const rank = new Map(state.order.map((id, i) => [id, i]));
-  return chosen.sort((a, b) => rank.get(a) - rank.get(b));
-}
-
-// What happens next, from the state alone.
+// What happens next, from the state alone. The second reader goes first: it is a call the
+// walk makes itself, and it is blind to the author either way.
 export function nextAction(state) {
-  if (state.pendingAuthor.length) return { action: "wait", reader: "author", tasks: state.pendingAuthor };
   if (state.pendingSecond.length) return { action: "second-read", task_id: state.pendingSecond[0], position: state.order.indexOf(state.pendingSecond[0]) + 1 };
+  if (state.pendingAuthor.length) return { action: "wait", reader: "author", tasks: state.pendingAuthor };
   if (state.accepted.length < state.n && state.next <= state.order.length) {
     const taskId = state.order[state.next - 1];
     const repo = state.byId.get(taskId).repo;
     const kind = (state.perRepo.get(repo) ?? 0) >= REPO_CAP ? "skip" : "validate";
     return { action: kind, position: state.next, task_id: taskId, repo };
   }
-  if (!state.secondSet) return { action: "draw-second", tasks: secondSubset(state) };
   return { action: "done", accepted: state.accepted.length, n: state.n, unmet: state.accepted.length < state.n };
 }
 
@@ -148,7 +117,9 @@ export function parseModelDecision(text) {
 
 export const PROMPT_PATH = new URL("../prompts/second-reader.md", import.meta.url);
 
-// The second reader's prompt: the fixed list and the task, nothing of the author's.
+// The second reader's prompt: the fixed list and the packet (protocol, "Second reader",
+// revised 2026-10-22): the frozen issue, the repository, the hidden test names and the test
+// patch. Never the gold patch, and nothing of the author's.
 export function secondPrompt(template, instance) {
   const reasons = Object.entries(REASONS).map(([code, text]) => `- ${code}: ${text}`).join("\n");
   const task = [
@@ -163,9 +134,6 @@ export function secondPrompt(template, instance) {
     "",
     "The test change:",
     instance.test_patch,
-    "",
-    "The fixing change:",
-    instance.patch,
     "TASK>>>",
   ].join("\n");
   return template.replace("{{REASONS}}", reasons).replace("{{TASK}}", task);
@@ -267,6 +235,23 @@ function loadFrame(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
+// Which of `names` occur as whole words anywhere in the repository at the base commit:
+// one archive download and one grep over it.
+async function namesInBase(repo, base, names) {
+  if (!names.length) return new Set();
+  const work = mkdtempSync(join(tmpdir(), "base-"));
+  const response = await fetch(`https://api.github.com/repos/${repo}/tarball/${base}`, { headers: { Authorization: `bearer ${process.env.GITHUB_TOKEN}`, "User-Agent": "capsid-bench-walk" } });
+  if (!response.ok) throw new Error(`the archive of ${repo} at ${base} answered ${response.status}`);
+  writeFileSync(join(work, "base.tar.gz"), Buffer.from(await response.arrayBuffer()));
+  mkdirSync(join(work, "tree"));
+  const tar = spawnSync("tar", ["xzf", join(work, "base.tar.gz"), "-C", join(work, "tree")], { stdio: "inherit" });
+  if (tar.status !== 0) throw new Error(`tar exited ${tar.status}`);
+  writeFileSync(join(work, "names.txt"), `${names.join("\n")}\n`);
+  const grep = spawnSync("grep", ["-rhowIF", "-f", join(work, "names.txt"), join(work, "tree")], { encoding: "utf8", maxBuffer: 1 << 30 });
+  if (grep.status > 1) throw new Error(`grep exited ${grep.status}`);
+  return new Set(grep.stdout.split("\n").filter(Boolean));
+}
+
 // One candidate through the three mechanical gates, in the protocol's order.
 async function gates(dir, candidate, recipe, position) {
   const base = { position, task_id: candidate.task_id, repo: candidate.repo };
@@ -278,7 +263,7 @@ async function gates(dir, candidate, recipe, position) {
   if (run.status !== 0) throw new Error(`validate.py exited ${run.status}`);
   const result = JSON.parse(readFileSync(join(work, "result.json"), "utf8"));
   if (result.verdict !== "passed") return { ...base, event: "excluded", step: "validation", reason: result.verdict, unreadable_runs: result.unreadable_runs, detail: result.detail };
-  const matches = leakage(instance.patch, instance.problem_statement ?? "");
+  const matches = leakage(instance.patch, instance.problem_statement ?? "", introducedIdentifiers(instance.patch, await namesInBase(candidate.repo, instance.base_commit, addedIdentifiers(instance.patch))));
   if (matches.length) return { ...base, event: "excluded", step: "leakage", reason: "leakage screen", matches };
   const task = { ...instance, FAIL_TO_PASS: result.FAIL_TO_PASS, PASS_TO_PASS: result.PASS_TO_PASS };
   mkdirSync(join(dir, "instances"), { recursive: true });
@@ -321,7 +306,6 @@ async function main() {
       return console.log(JSON.stringify({ ...next, considered: state.next - 1, of: state.order.length, accepted: state.accepted.length, n: state.n }));
     }
     if (next.action === "skip") append(dir, { position: next.position, task_id: next.task_id, repo: next.repo, event: "skipped", reason: "repository at cap" });
-    if (next.action === "draw-second") append(dir, { event: "second reader set", tasks: next.tasks });
     if (next.action === "validate") {
       const repos = JSON.parse(readFileSync(values.repos, "utf8"));
       const candidate = state.byId.get(next.task_id);

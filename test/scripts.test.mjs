@@ -203,7 +203,7 @@ test("the analysis replays slots as Capsid fills them and holds back an outage h
   const r = (status, at, stopped = false) => ({ arm: "baseline", status, started_at: at, finished_at: at, report: JSON.stringify({ stopped_on_error: stopped }) });
   const outage = outageHours([r("unjudged", "2026-11-01T05:01:00Z", true), r("unjudged", "2026-11-01T05:02:00Z", true), r("scored", "2026-11-01T05:03:00Z"), r("scored", "2026-11-01T05:04:00Z")]);
   assert.deepEqual([...outage], ["2026-11-01T05"]);
-  // A scored second stop in an outage hour is unjudged for the analysis.
+  // A scored error stop in an outage hour is held back for the analysis.
   const second = r("scored", "2026-11-01T05:30:00Z", true);
   assert.equal(analysisStatus(second, outage), "outage");
   assert.equal(analysisStatus(r("scored", "2026-11-01T06:30:00Z", true), outage), "scored");
@@ -214,7 +214,7 @@ test("the analysis replays slots as Capsid fills them and holds back an outage h
 });
 
 test("the analysis stays sealed until the registered N, then gives the paired difference, its interval and the bounds", async () => {
-  const { analyze, allowedSentence, pilot } = await import("../scripts/analyze.mjs");
+  const { analyze, allowedSentence } = await import("../scripts/analyze.mjs");
   const tasks = [];
   const draw = [];
   const runs = [];
@@ -243,19 +243,30 @@ test("the analysis stays sealed until the registered N, then gives the paired di
   assert.deepEqual(open.accepted, { tasks: 6, repositories: 3 });
   assert.match(open.sentence, /Below the floor .*not confirmatory/);
   assert.equal(open.sensitivity.b.against_treatment.estimate, -1);
+  assert.deepEqual(open.primary_set, { tasks: 6, repositories: 3 });
+  // A task without 3 scored runs in each arm is out of the primary set.
+  const short = analyze({ tasks, draw, runs: runs.filter((r, i) => i !== 0) }, { n: 5, accepted, resamples: 200 });
+  assert.equal(short.primary_set.tasks, 5);
+  assert.equal(short.primary.b.tasks, 5);
   // The same export and seed give the same interval.
   assert.deepEqual(analyze({ tasks, draw, runs }, { n: 6, accepted, resamples: 200 }).secondary, open.secondary);
-  // (b) is tested only at 120 tasks from 80 repositories; resolution is always a description.
-  assert.match(allowedSentence({ tasks: 120, repositories: 80 }, { low: -0.2, high: -0.01 }), /favours the treatment/);
-  assert.match(allowedSentence({ tasks: 120, repositories: 80 }, { low: 0.01, high: 0.2 }), /favours the baseline/);
-  assert.match(allowedSentence({ tasks: 120, repositories: 80 }, { low: -0.1, high: 0.1 }), /no difference is claimed/);
-  assert.match(allowedSentence({ tasks: 119, repositories: 80 }, { low: -0.2, high: -0.01 }), /not confirmatory/);
-  assert.match(allowedSentence({ tasks: 400, repositories: 79 }, { low: -0.2, high: -0.01 }), /not confirmatory/);
-  for (const n of [10, 120, 400]) assert.match(allowedSentence({ tasks: n, repositories: 200 }, { low: 0, high: 0 }), /Resolution is reported as a description, with no non-inferiority test/);
+  // The joint rule, counted in the primary set at 120 tasks from 80 repositories.
+  const floor = { tasks: 120, repositories: 80 };
+  const ok = { audited: 160, none: 16, share: 0.1 };
+  const lower = { low: -0.2, high: -0.01 };
+  assert.match(allowedSentence(floor, lower, { low: -0.09, high: 0.05 }, ok), /treatment is favoured/);
+  // Resolution falling 10 points or more withholds the win.
+  assert.match(allowedSentence(floor, lower, { low: -0.1, high: 0.05 }, ok), /Neither arm/);
+  // There is no win for the baseline on (b) alone.
+  assert.match(allowedSentence(floor, { low: 0.01, high: 0.2 }, { low: -0.05, high: 0.05 }, ok), /Neither arm/);
+  assert.match(allowedSentence({ tasks: 119, repositories: 80 }, lower, { low: 0, high: 0.1 }, ok), /not confirmatory/);
+  assert.match(allowedSentence({ tasks: 400, repositories: 79 }, lower, { low: 0, high: 0.1 }, ok), /not confirmatory/);
+  // More than 10% non-marking second-reader responses, or no log, withholds the label.
+  assert.match(allowedSentence(floor, lower, { low: 0, high: 0.1 }, { audited: 160, none: 17, share: 17 / 160 }), /Not confirmatory: 17 of 160/);
+  assert.match(allowedSentence(floor, lower, { low: 0, high: 0.1 }, null), /log was not given/);
   // The draw must be exactly the accepted set, with the same repositories.
   assert.throws(() => analyze({ tasks, draw, runs }, { n: 6, accepted: accepted.slice(1), resamples: 200 }), /not the accepted set/);
   assert.throws(() => analyze({ tasks, draw, runs }, { n: 6, accepted: accepted.map((a, i) => (i ? a : { ...a, repo: "sample/other" })), resamples: 200 }), /names repository/);
-  assert.equal(pilot({ tasks, runs }).tasks, 0);
   // Three repositories, each at the cap, reported beside N.
   assert.equal(open.counts.repositories, 3);
   assert.equal(open.counts.max_tasks_per_repository, 2);
@@ -289,4 +300,15 @@ test("the bootstrap resamples repositories, keeping every difference from a draw
     values.add(r.low);
   }
   for (const v of values) assert.ok([0, 2 / 3, 1].some((x) => Math.abs(x - v) < 1e-12), String(v));
+});
+
+test("the second reader's non-marking share counts its responses on accepted tasks only", async () => {
+  const { nonMarkingShare } = await import("../scripts/analyze.mjs");
+  const audit = [
+    { event: "audit", reader: "second", task_id: "sample__a-1", decision: "in" },
+    { event: "audit", reader: "second", task_id: "sample__a-2", decision: "none" },
+    { event: "audit", reader: "author", task_id: "sample__a-2", decision: "in" },
+    { event: "audit", reader: "second", task_id: "sample__b-3", decision: "none" },
+  ];
+  assert.deepEqual(nonMarkingShare(audit, ["sample__a-1", "sample__a-2"]), { audited: 2, none: 1, share: 0.5 });
 });

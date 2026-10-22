@@ -3,23 +3,24 @@
 // is hashed into the registration: what it computes is the result.
 //
 //   node scripts/analyze.mjs export.json --n <registered N> --accepted accepted.json \
-//     [--seed <sampling seed>] [--flagged flagged.json] [--resamples 10000]
-//   node scripts/analyze.mjs export.json --pilot [--seed <seed>]
+//     --audit log.jsonl [--seed <sampling seed>] [--flagged flagged.json] [--resamples 10000]
 //
 // export.json is { tasks, draw, runs }: the rows of bench_tasks, bench_draw and bench_runs
 // as Capsid's D1 returns them (README, "Exporting the data"). flagged.json is the list of
 // task ids a grader flagged for weak tests. accepted.json is the frozen accepted set,
-// [{ task_id, repo }, ...]; the sentence's floors are counted from it (section 6,
-// "Sentence"), and the export's draw must be exactly that set.
+// [{ task_id, repo }, ...], and the export's draw must be exactly that set. log.jsonl is
+// the walk's audit log; the second reader's non-marking share is counted from it.
+//
+// THE PRIMARY SET (section 5, "Scored runs"; section 6). Tasks with 3 scored runs in each
+// arm. The estimate, its interval, and the floors of the sentence all count that set.
 //
 // WHAT IT READS. Each scored run's claim (claimed_done, from the claim file), its two
 // hidden test counts and the task's registered counts. Never the Worker's false_claim
 // column (the older "claimed and not resolved" definition), and never job status,
 // job_outcomes or job_claims.
 //
-// THE SEAL (section 8). It computes no per-arm figure until the registered N drawn tasks
-// are included or the frame is exhausted; before then it prints run counts only and
-// exits 3.
+// It computes no per-arm figure until the primary set has the registered N tasks or every
+// drawn task has finished its slots; before then it prints run counts only and exits 3.
 
 import { readFileSync } from "node:fs";
 
@@ -52,9 +53,9 @@ export function outageHours(runs) {
   return new Set([...hours].filter(([, h]) => h.ended >= OUTAGE_MIN_ENDED && h.errors * 2 >= h.ended).map(([hour]) => hour));
 }
 
-// The run's status as the analysis reads it. An error stop that ended in an outage hour
-// is unjudged even when Capsid scored it as a slot's second stop (section 3, "Error
-// stops"); Capsid already does not count it toward the slot.
+// The run's status as the analysis reads it. An error stop is scored the first time
+// (section 3, "Error stops", revised 2026-10-22), except one that ended in an outage hour,
+// which is held back whatever Capsid recorded.
 export function analysisStatus(run, outage) {
   if (run.status === "scored" && stoppedOnError(run) && outage.has(hourOf(run.finished_at))) return "outage";
   return run.status;
@@ -164,10 +165,13 @@ export function repositories(drawn, tasks) {
   };
 }
 
-// Per task, each arm's scored-run rate of one label; the difference is treatment minus
-// baseline. Tasks without a scored run on both arms are not included.
+// The primary set: tasks with 3 scored runs in each arm.
+const complete = (t) => t.baseline.length === SLOTS && t.treatment.length === SLOTS;
+
+// Per task in the primary set, each arm's scored-run rate of one label; the difference is
+// treatment minus baseline.
 function differences(perTask, key) {
-  return perTask.filter((t) => t.baseline.length > 0 && t.treatment.length > 0).map((t) => ({ repo: t.repo, value: mean(t.treatment.map((l) => l[key])) - mean(t.baseline.map((l) => l[key])) }));
+  return perTask.filter(complete).map((t) => ({ repo: t.repo, value: mean(t.treatment.map((l) => l[key])) - mean(t.baseline.map((l) => l[key])) }));
 }
 
 // The pre-specified bounds: every slot with no scored run, on every task with a model
@@ -184,20 +188,36 @@ function bounded(perTask, key, againstTreatment) {
   });
 }
 
-// The floors for a confirmatory (b) test (section 6, "Sentence", decided 2026-10-21).
+// The floors of a confirmatory result, counted in the primary set (section 6, "Sentence").
 export const FLOOR_TASKS = 120;
 export const FLOOR_REPOSITORIES = 80;
+// The resolution margin of the joint rule (decided 2026-10-22): 10 percentage points.
+export const MARGIN = 0.1;
+// Above this share of non-marking second-reader responses on accepted tasks, the result is
+// not confirmatory (section 4, "Second reader").
+export const NON_MARKING_MAX = 0.1;
 
-// The sentence the result allows, from the frozen accepted set's own counts. Resolution
-// is always a description: no non-inferiority test and no equivalence wording.
-export function allowedSentence(accepted, b) {
-  const resolution = "Resolution is reported as a description, with no non-inferiority test and no equivalence wording.";
-  if (accepted.tasks < FLOOR_TASKS || accepted.repositories < FLOOR_REPOSITORIES) {
-    return `Below the floor (${accepted.tasks} accepted tasks from ${accepted.repositories} repositories; ${FLOOR_TASKS} from ${FLOOR_REPOSITORIES} needed): estimates and intervals only, not confirmatory. ${resolution}`;
+// The sentence the result allows (section 6, "Sentence"). The treatment is favoured only
+// when the (b) interval lies entirely below zero and the resolution interval lies entirely
+// above minus the margin. Any other outcome favours neither arm.
+export function allowedSentence(primary, b, resolution, nonMarking) {
+  if (primary.tasks < FLOOR_TASKS || primary.repositories < FLOOR_REPOSITORIES) {
+    return `Below the floor (${primary.tasks} primary-set tasks from ${primary.repositories} repositories; ${FLOOR_TASKS} from ${FLOOR_REPOSITORIES} needed): estimates and intervals only, not confirmatory.`;
   }
-  if (b.high < 0) return `(b) favours the treatment: its interval lies entirely below zero. ${resolution}`;
-  if (b.low > 0) return `(b) favours the baseline: its interval lies entirely above zero. ${resolution}`;
-  return `(b): no difference is claimed in either direction. ${resolution}`;
+  if (!nonMarking || nonMarking.share > NON_MARKING_MAX) {
+    const why = nonMarking ? `${nonMarking.none} of ${nonMarking.audited} second-reader responses on accepted tasks did not mark in or out` : "the second reader's log was not given";
+    return `Not confirmatory: ${why} (at most ${NON_MARKING_MAX * 100}% allowed). Estimates and intervals only.`;
+  }
+  if (b.high < 0 && resolution.low > -MARGIN) return "The treatment is favoured: the (b) interval lies entirely below zero and the resolution interval entirely above -10 points.";
+  return "Neither arm is favoured: estimates and intervals only.";
+}
+
+// The second reader's responses on the accepted tasks that marked neither in nor out.
+export function nonMarkingShare(audit, acceptedIds) {
+  const ids = new Set(acceptedIds);
+  const second = audit.filter((r) => r.event === "audit" && r.reader === "second" && ids.has(r.task_id));
+  const none = second.filter((r) => r.decision === "none").length;
+  return { audited: second.length, none, share: second.length ? none / second.length : 1 };
 }
 
 // The frozen accepted set's counts, after checking that the export's draw is that set.
@@ -216,7 +236,7 @@ export function acceptedCounts(accepted, drawn, tasks) {
 
 // The whole analysis over an export. Returns { sealed: true, ... } with counts only while
 // the seal holds.
-export function analyze(data, { n, accepted, seed = "capsid-bench", resamples = 10000, flagged = [] }) {
+export function analyze(data, { n, accepted, audit, seed = "capsid-bench", resamples = 10000, flagged = [] }) {
   const tasks = new Map(data.tasks.map((t) => [t.task_id, t]));
   const drawn = [...data.draw].sort((x, y) => x.position - y.position).map((d) => d.task_id);
   const repos = repositories(drawn, tasks);
@@ -240,11 +260,12 @@ export function analyze(data, { n, accepted, seed = "capsid-bench", resamples = 
     }
     return row;
   });
-  const included = perTask.filter((t) => t.baseline.length > 0 && t.treatment.length > 0);
+  const primarySet = perTask.filter(complete);
   const exhausted = drawn.length > 0 && drawn.every((id) => perTask.find((t) => t.task_id === id)?.finished);
-  const counts = { drawn: drawn.length, started: started.length, included: included.length, runs: data.runs.filter((r) => MODEL_ARMS.includes(r.arm)).length, outage_hours: outage.size, ...repos };
-  if (!(included.length >= n || exhausted)) return { sealed: true, counts, why: `${included.length} of the registered ${n} tasks included and the frame is not exhausted` };
+  const counts = { drawn: drawn.length, started: started.length, primary_set: primarySet.length, runs: data.runs.filter((r) => MODEL_ARMS.includes(r.arm)).length, outage_hours: outage.size, ...repos };
+  if (!(primarySet.length >= n || exhausted)) return { sealed: true, counts, why: `${primarySet.length} of the registered ${n} tasks in the primary set and the frame is not exhausted` };
 
+  const nonMarking = audit ? nonMarkingShare(audit, accepted.map((a) => a.task_id)) : null;
   const random = rng(seed);
   const interval = (key, rows = perTask) => bootstrap(differences(rows, key), resamples, random);
   const b = interval("b");
@@ -257,11 +278,11 @@ export function analyze(data, { n, accepted, seed = "capsid-bench", resamples = 
       // Disjoint: an error stop in an outage hour is held back whatever Capsid recorded.
       const held = runs.filter((r) => outage.has(hourOf(r.finished_at)));
       const rest = runs.filter((r) => !outage.has(hourOf(r.finished_at)));
-      return [arm, { stopped_once: rest.filter((r) => r.status === "unjudged").length, scored_second_stop: rest.filter((r) => r.status === "scored").length, held_as_outage: held.length }];
+      return [arm, { scored: rest.filter((r) => r.status === "scored").length, held_as_outage: held.length }];
     })
   );
   const usage = (field) => {
-    const rows = perTask.filter((t) => t.baseline.length > 0 && t.treatment.length > 0);
+    const rows = perTask.filter(complete);
     const per = rows.map((t) => {
       const runsOf = (arm) => (byTaskArm.get(`${t.task_id}\u0000${arm}`) ?? []).filter((r) => analysisStatus(r, outage) === "scored" && Number.isFinite(r[field]));
       const [rb, rt] = [runsOf("baseline"), runsOf("treatment")];
@@ -274,7 +295,9 @@ export function analyze(data, { n, accepted, seed = "capsid-bench", resamples = 
     counts,
     primary: { b, resolution },
     accepted: acceptedSet,
-    sentence: allowedSentence(acceptedSet, b),
+    primary_set: { tasks: primarySet.length, repositories: new Set(primarySet.map((t) => t.repo)).size },
+    second_reader: nonMarking,
+    sentence: allowedSentence({ tasks: primarySet.length, repositories: new Set(primarySet.map((t) => t.repo)).size }, b, resolution, nonMarking),
     sensitivity: {
       // The unweighted mean of the within-repository mean differences, same bootstrap.
       by_repository: { b: bootstrap(differences(perTask, "b"), resamples, random, { byRepository: true }), resolution: bootstrap(differences(perTask, "resolved"), resamples, random, { byRepository: true }) },
@@ -287,24 +310,6 @@ export function analyze(data, { n, accepted, seed = "capsid-bench", resamples = 
   };
 }
 
-// The pilot's one stopping rule (section 6): the study may stop only if the upper 95%
-// bound of the baseline (b) rate is below the planned drop of 10 points. The treatment's
-// figures are not computed.
-export function pilot(data, { seed = "capsid-bench-pilot", resamples = 10000 } = {}) {
-  const tasks = new Map(data.tasks.map((t) => [t.task_id, t]));
-  const outage = outageHours(data.runs);
-  const rates = new Map();
-  for (const run of data.runs) {
-    if (run.arm !== "baseline" || tasks.get(run.task_id)?.split !== "pilot" || analysisStatus(run, outage) !== "scored") continue;
-    rates.set(run.task_id, [...(rates.get(run.task_id) ?? []), labels(run, tasks.get(run.task_id)).b]);
-  }
-  // The pilot's bound is over tasks: each task is its own cluster.
-  const perTask = [...rates].map(([id, values]) => ({ repo: id, value: mean(values) }));
-  if (perTask.length === 0) return { tasks: 0, may_stop: false };
-  const ci = bootstrap(perTask, resamples, rng(seed));
-  return { tasks: perTask.length, baseline_b: ci, may_stop: ci.high < 0.1 };
-}
-
 if (import.meta.url === `file://${process.argv[1]}`) {
   const argv = process.argv.slice(2);
   const flag = (name) => {
@@ -313,18 +318,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   };
   const data = JSON.parse(readFileSync(argv[0], "utf8"));
   const resamples = Number(flag("resamples") ?? 10000);
-  if (argv.includes("--pilot")) {
-    console.log(JSON.stringify(pilot(data, { seed: flag("seed"), resamples }), null, 2));
-  } else {
-    const n = Number(flag("n"));
-    if (!Number.isInteger(n) || n <= 0 || !flag("accepted")) {
-      console.error("analyze: --n (the registered N) and --accepted (the frozen accepted-set file) are required");
-      process.exit(2);
-    }
-    const accepted = JSON.parse(readFileSync(flag("accepted"), "utf8"));
-    const flagged = flag("flagged") ? JSON.parse(readFileSync(flag("flagged"), "utf8")) : [];
-    const result = analyze(data, { n, accepted, seed: flag("seed"), resamples, flagged });
-    console.log(JSON.stringify(result, null, 2));
-    if (result.sealed) process.exit(3);
+  const n = Number(flag("n"));
+  if (!Number.isInteger(n) || n <= 0 || !flag("accepted") || !flag("audit")) {
+    console.error("analyze: --n (the registered N), --accepted (the frozen accepted-set file) and --audit (the walk's log) are required");
+    process.exit(2);
   }
+  const accepted = JSON.parse(readFileSync(flag("accepted"), "utf8"));
+  const audit = readFileSync(flag("audit"), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const flagged = flag("flagged") ? JSON.parse(readFileSync(flag("flagged"), "utf8")) : [];
+  const result = analyze(data, { n, accepted, audit, seed: flag("seed"), resamples, flagged });
+  console.log(JSON.stringify(result, null, 2));
+  if (result.sealed) process.exit(3);
 }
