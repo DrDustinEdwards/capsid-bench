@@ -1,0 +1,26 @@
+name: bench-second-reader
+
+# Lists the model identifiers the second reader's key can use, so the registration can
+# name one exactly (protocol, "Second reader"). Prints identifiers only, never the key,
+# and sends no task to any model.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  models:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: List the models
+        env:
+          SECOND_READER_URL: ${{ vars.SECOND_READER_URL }}
+          SECOND_READER_KEY: ${{ secrets.SECOND_READER_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "${SECOND_READER_URL}" ] && [ -n "${SECOND_READER_KEY}" ] || { echo "set SECOND_READER_URL and SECOND_READER_KEY first" >&2; exit 1; }
+          curl -fsS -H "Authorization: Bearer ${SECOND_READER_KEY}" "${SECOND_READER_URL%/chat/completions}/models" |
+            jq -r '.data[] | "\(.id)\t\(.created // "" | tostring)"' | sort | tee -a "$GITHUB_STEP_SUMMARY"
