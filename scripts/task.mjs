@@ -32,6 +32,10 @@ export function checkTask(task) {
   for (const field of ["task_id", "repo", "base_commit", "image", "problem_statement", "gold_patch", "issue_created_at"]) {
     if (!str(field)) problems.push(`${field} must be a non-empty string`);
   }
+  // These reach GITHUB_OUTPUT one per line, so a line break would write another output.
+  for (const field of ["repo", "base_commit", "image", "setup"]) {
+    if (typeof task[field] === "string" && /[\r\n]/.test(task[field])) problems.push(`${field} may not hold a line break (it is written to GITHUB_OUTPUT)`);
+  }
   if (!SOURCES.includes(task.source)) problems.push(`source must be one of ${SOURCES.join(", ")}`);
   if (!SPLITS.includes(task.split)) problems.push(`split must be one of ${SPLITS.join(", ")}`);
   if (!Array.isArray(task.fail_to_pass) || task.fail_to_pass.length === 0) problems.push("fail_to_pass must list at least one test");

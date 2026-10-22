@@ -1,0 +1,10 @@
+{
+  "name": "capsid-bench-tools",
+  "private": true,
+  "description": "The seal (tlock-js, sigstore) and the drand check (@noble/curves), locked so every job installs the same tree with npm ci --prefix tools.",
+  "dependencies": {
+    "@noble/curves": "2.4.0",
+    "sigstore": "4.1.1",
+    "tlock-js": "0.9.0"
+  }
+}

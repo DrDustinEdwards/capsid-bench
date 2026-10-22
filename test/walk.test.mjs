@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { auditBody, fenced, nextAction, parseDecision, parseModelDecision, permutation, replay, secondPrompt, secondReaderConfig } from "../scripts/walk.mjs";
+import { FRAME_SHA256, auditBody, fenced, nextAction, parseDecision, parseModelDecision, permutation, replay, secondPrompt, secondReaderConfig } from "../scripts/walk.mjs";
 
 // The walk (protocol section 4, "Audit" and "Draw") replayed from hand-made logs over a
 // fake frame: repositories in the "sample" namespace.
@@ -115,4 +117,11 @@ test("the author's packet is the second reader's: the issue and the tests, never
   assert.match(body, /It breaks\./);
   assert.match(body, /t1/);
   assert.doesNotMatch(body, /gold/i);
+});
+
+// The walk refuses any frame whose bytes are not this hash, so a mistyped constant stops
+// every step (it once dropped a digit).
+test("the frozen frame's hash is the committed file's", () => {
+  const bytes = readFileSync(new URL("../frame/candidates.json", import.meta.url));
+  assert.equal(createHash("sha256").update(bytes).digest("hex"), FRAME_SHA256);
 });

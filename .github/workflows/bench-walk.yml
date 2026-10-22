@@ -73,8 +73,8 @@ jobs:
           REGISTRATION: ${{ inputs.registration }}
         run: |
           set -euo pipefail
-          npm install --no-save --silent --prefix "${RUNNER_TEMP}/noble" @noble/curves@2.4.0
-          NOBLE_BLS="${RUNNER_TEMP}/noble/node_modules/@noble/curves/bls12-381.js" node scripts/seed.mjs --t "${T}" > "${RUNNER_TEMP}/seed.json"
+          npm ci --silent --ignore-scripts --prefix tools
+          NOBLE_BLS="${PWD}/tools/node_modules/@noble/curves/bls12-381.js" node scripts/seed.mjs --t "${T}" > "${RUNNER_TEMP}/seed.json"
           cat "${RUNNER_TEMP}/seed.json" | tee -a "$GITHUB_STEP_SUMMARY"
           node scripts/walk.mjs start --dir walk-state --beacon "${RUNNER_TEMP}/seed.json" --registration "${REGISTRATION}"
           cd walk-state && git add -A && { git diff --cached --quiet || { git commit -qm "walk: start" && git push -q origin walk; }; }

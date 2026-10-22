@@ -61,6 +61,14 @@ export function emptyDiffScore(task) {
   };
 }
 
+// One hidden test command's docker exit: 0 passes. No status (docker never started) or
+// 125 (docker run itself failed) is a machine failure, so the run is left unjudged
+// rather than scored as a failed test.
+export function testOutcome(status) {
+  if (status === null || status === 125) return "machine";
+  return status === 0 ? "pass" : "fail";
+}
+
 function run(cmd, args, opts = {}) {
   const result = spawnSync(cmd, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...opts });
   return { status: result.status, out: `${result.stdout ?? ""}${result.stderr ?? ""}` };
@@ -136,10 +144,17 @@ function scoreOwn(task, diffFile, work) {
   const hidden = run("git", ["-C", repo, "fetch", "--quiet", "origin", task.fix_commit]);
   const checkout = hidden.status === 0 ? run("git", ["-C", repo, "checkout", task.fix_commit, "--", ...task.hidden_files]) : hidden;
   if (checkout.status !== 0) return { environment: { ok: false, reason: `could not stage the hidden test files: ${checkout.out.slice(-300)}` } };
-  const passes = (command) =>
-    run("docker", ["run", "--rm", "--network", "none", "-v", `${repo}:/testbed`, "-w", "/testbed", task.image, "sh", "-c", command]).status === 0;
+  let machine = null;
+  const passes = (command) => {
+    if (machine) return false;
+    const r = run("docker", ["run", "--rm", "--network", "none", "-v", `${repo}:/testbed`, "-w", "/testbed", task.image, "sh", "-c", command]);
+    const outcome = testOutcome(r.status);
+    if (outcome === "machine") machine = `docker could not run a test command (exit ${r.status}): ${r.out.slice(-300)}`;
+    return outcome === "pass";
+  };
   const f2p = task.fail_to_pass.filter(passes).length;
   const p2pFailed = task.pass_to_pass.filter((c) => !passes(c));
+  if (machine) return { environment: { ok: false, reason: machine } };
   return {
     environment: { ok: true, reason: null },
     hidden: {

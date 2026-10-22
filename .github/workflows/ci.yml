@@ -54,8 +54,8 @@ jobs:
       - name: Verify a past quicknet round
         run: |
           set -euo pipefail
-          npm install --no-save --silent --prefix "${RUNNER_TEMP}/noble" @noble/curves@2.4.0
-          NOBLE_BLS="${RUNNER_TEMP}/noble/node_modules/@noble/curves/bls12-381.js" node scripts/seed.mjs --round 1000
+          npm ci --silent --ignore-scripts --prefix tools
+          NOBLE_BLS="${PWD}/tools/node_modules/@noble/curves/bls12-381.js" node scripts/seed.mjs --round 1000
 
   seal:
     permissions:
@@ -77,8 +77,8 @@ jobs:
       - name: Lock to a past round and open it
         run: |
           set -euo pipefail
-          npm install --no-save --silent --prefix "${RUNNER_TEMP}/seal" tlock-js@0.9.0 sigstore@4.1.1
-          SEAL_MODULES="${RUNNER_TEMP}/seal/node_modules" node --input-type=module -e '
+          npm ci --silent --ignore-scripts --prefix tools
+          SEAL_MODULES="${PWD}/tools/node_modules" node --input-type=module -e '
             import { createRequire } from "node:module";
             import { lockedRound } from "./scripts/unseal.mjs";
             const tlock = createRequire(process.env.SEAL_MODULES + "/x.cjs")("tlock-js");

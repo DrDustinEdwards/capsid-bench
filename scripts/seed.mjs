@@ -8,7 +8,7 @@
 //   node scripts/seed.mjs --t 2026-11-01T00:00:00Z      # the registered round
 //   node scripts/seed.mjs --round 1000                   # any past round, as a check
 //
-// Needs @noble/curves (pinned in the workflows); NOBLE_BLS names its bls12-381.js file.
+// Needs @noble/curves (locked in tools/package-lock.json); NOBLE_BLS names its bls12-381.js file.
 
 import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";

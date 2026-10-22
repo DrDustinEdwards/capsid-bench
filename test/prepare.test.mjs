@@ -55,6 +55,19 @@ test("the issue text is the body as it stood before the first fix commit", () =>
   assert.equal(bodyAt({ body: "never edited", lastEditedAt: null }, "2026-07-30T00:00:00Z"), "never edited");
 });
 
+test("the edit history is paged back until an edit at or before the first fix", async () => {
+  const { editsBack } = await import("../scripts/prepare-candidate.mjs");
+  const calls = [];
+  const gh = { graphql: async (_q, vars) => (calls.push(vars.before), { repository: { issue: { userContentEdits: { nodes: [{ editedAt: "2026-08-01T00:00:00Z", diff: "original" }], pageInfo: { hasPreviousPage: false, startCursor: null } } } } }) };
+  const newest = { nodes: [{ editedAt: "2026-08-05T00:00:00Z", diff: "later" }], pageInfo: { hasPreviousPage: true, startCursor: "c1" } };
+  const edits = await editsBack(gh, {}, newest, "2026-08-02T00:00:00Z");
+  assert.deepEqual(calls, ["c1"]);
+  assert.equal(bodyAt({ body: "later", lastEditedAt: "2026-08-05T00:00:00Z", userContentEdits: edits }, "2026-08-02T00:00:00Z"), "original");
+  // An edit before the fix is already in hand: no further page.
+  await editsBack(gh, {}, { nodes: [{ editedAt: "2026-08-01T00:00:00Z", diff: "x" }], pageInfo: { hasPreviousPage: true, startCursor: "c2" } }, "2026-08-02T00:00:00Z");
+  assert.deepEqual(calls, ["c1"]);
+});
+
 test("the leakage screen matches whole added lines, not punctuation", () => {
   const issue = "It breaks.\n  x = compute(2)  \n}\n";
   assert.deepEqual(leakage(DIFF, issue), ["x = compute(2)"]);

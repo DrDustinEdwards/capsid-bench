@@ -38,7 +38,7 @@ import { N, REPO_CAP, rng } from "./analyze.mjs";
 import { addedIdentifiers, github, introducedIdentifiers, leakage, prepare } from "./prepare-candidate.mjs";
 
 // The frozen frame (run 39487118514, frame/candidates.json). The walk refuses any other.
-export const FRAME_SHA256 = "68cbf6d3d73a3730e13aad43b2bfcb54df72cfaff2cee1a6e44930c567f006e";
+export const FRAME_SHA256 = "68cbf6d39d73a3730e13aad43b2bfcb54df72cfaff2cee1a6e44930c567f006e";
 
 // The fixed exclusion list (protocol section 4, step 6), by the code a reader writes.
 export const REASONS = {

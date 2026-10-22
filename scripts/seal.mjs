@@ -22,7 +22,7 @@
 // the redacted report: the hidden suites' sizes and no passed counts, no claim, no usage,
 // and the ciphertext's hash and Rekor index. scripts/unseal.mjs checks and opens it.
 //
-// Needs tlock-js and sigstore (pinned in the workflow); SEAL_MODULES names the
+// Needs tlock-js and sigstore (locked in tools/package-lock.json); SEAL_MODULES names the
 // node_modules directory they are installed in.
 
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from "node:crypto";

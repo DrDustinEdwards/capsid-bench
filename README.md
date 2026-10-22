@@ -27,7 +27,7 @@ A run Capsid cannot judge (the machine failed, a hidden test did not run, Claude
 
 - Secrets: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`, Dustin's subscription), `BENCH_KEY` (a fresh random value, set at the same time as Capsid's `BENCH_SECRET`; the commands are in capsid's docs/bench.md), `BENCH_DRIVER_KEY` (a Capsid driver key for the `bench` namespace, no flags, narrowed to posting: tools `capsid_work_jobs` and `capsid_work_jobs.post`).
 - Never set `ANTHROPIC_API_KEY` here: it would win over the token and bill the Console account. The run refuses to start if it is set.
-- Variables: `CLAUDE_CODE_VERSION`, `SWE_HARNESS_REF` (a commit of [SWE-rebench/SWE-bench-fork](https://github.com/SWE-rebench/SWE-bench-fork)) and `SEAL_T` (T_seal, a UTC instant after the last run), all fixed at pre-registration.
+- Variables: `CLAUDE_CODE_VERSION` and `SEAL_T` (T_seal, a UTC instant after the last run), all fixed at pre-registration.
 - In Capsid: migrations 0047 and 0049 applied, the `bench` namespace created, and KV `bench:enabled` set to `on` only while runs are wanted.
 
 ## Tasks
@@ -49,8 +49,8 @@ node scripts/analyze.mjs export.json --accepted accepted.json --audit log.jsonl 
 After round R_seal is published, check out the `sealed` branch and open the sealed runs into the export before the analysis. `scripts/unseal.mjs` opens a run only when its ciphertext's SHA-256 is the one Capsid recorded, its Sigstore bundle verifies as signed by `bench-run.yml` on main at the registered commit, its Rekor entry is the recorded index and was integrated before round R_seal, and the ciphertext is locked to R_seal and opens to that run's own bundle; it stops at the first run that fails.
 
 ```
-npm install --no-save --prefix seal tlock-js@0.9.0 sigstore@4.1.1
-SEAL_MODULES=seal/node_modules node scripts/unseal.mjs export.json --sealed <sealed checkout> --t <T_seal> --commit <registered commit> --out opened.json
+npm ci --ignore-scripts --prefix tools
+SEAL_MODULES=tools/node_modules node scripts/unseal.mjs export.json --sealed <sealed checkout> --t <T_seal> --commit <registered commit> --out opened.json
 ```
 
 ### Exporting the data
