@@ -62,7 +62,9 @@ env:
   # default for Sonnet 5.5 is medium and the API's is high, so a blank would be ambiguous.
   EFFORT: high
   CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
-  SWE_HARNESS_REF: ${{ vars.SWE_HARNESS_REF }}
+  # The same harness commit bench-walk.yml and bench-validate.yml install, so validation
+  # and scoring run one harness, fixed by this workflow's commit (which the seal checks).
+  HARNESS: git+https://github.com/SWE-rebench/SWE-bench-fork@e4907b7a90eafaa1f0a6428fd04fe31cdd8b4284
   CAPSID_URL: https://mcp.dustinedwards.info
   # The proxy's image, the digest capsid's improve scorer pins.
   NODE_IMAGE: node:26.11.1-bookworm@sha256:f1233c415b41ffcf237c717b3dea92e9d4ea006e0e4c71edcb790605d74f5404
@@ -278,9 +280,8 @@ jobs:
         if: (inputs.arm == 'baseline' || inputs.arm == 'treatment') && steps.task.outputs.source != 'own'
         run: |
           set -euo pipefail
-          [[ "${SWE_HARNESS_REF}" =~ ^[0-9a-f]{40}$ ]] || { echo "set the repo variable SWE_HARNESS_REF to a commit sha" >&2; exit 1; }
           python3 -m venv "${RUNNER_TEMP}/venv"
-          "${RUNNER_TEMP}/venv/bin/pip" install --quiet "git+https://github.com/SWE-rebench/SWE-bench-fork@${SWE_HARNESS_REF}"
+          "${RUNNER_TEMP}/venv/bin/pip" install --quiet "${HARNESS}"
 
       - name: Verify, then run phase two
         if: inputs.arm == 'baseline' || inputs.arm == 'treatment'
@@ -395,9 +396,8 @@ jobs:
           set -euo pipefail
           SOURCE=$(node -p 'require(process.argv[1]).source' "./tasks/${TASK_ID}.json")
           if [ "${SOURCE}" != own ]; then
-            [[ "${SWE_HARNESS_REF}" =~ ^[0-9a-f]{40}$ ]] || { echo "set the repo variable SWE_HARNESS_REF to a commit sha" >&2; exit 1; }
             python3 -m venv "${RUNNER_TEMP}/venv"
-            "${RUNNER_TEMP}/venv/bin/pip" install --quiet "git+https://github.com/SWE-rebench/SWE-bench-fork@${SWE_HARNESS_REF}"
+            "${RUNNER_TEMP}/venv/bin/pip" install --quiet "${HARNESS}"
           fi
 
       - name: Score against the hidden tests

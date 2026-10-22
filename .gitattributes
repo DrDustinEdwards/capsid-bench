@@ -1,0 +1,3 @@
+# The walk hashes the frozen frame byte for byte (scripts/walk.mjs FRAME_SHA256), so
+# no checkout may change its line endings.
+frame/*.json -text

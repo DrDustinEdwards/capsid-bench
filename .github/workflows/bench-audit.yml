@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   record:
-    if: github.event.issue.pull_request == null && github.event.issue.state == 'open'
+    if: github.event.issue.pull_request == null && github.event.issue.state == 'open' && github.event.comment.user.login == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

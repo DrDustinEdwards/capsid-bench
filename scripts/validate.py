@@ -71,15 +71,16 @@ def lists(before, after, passed, failed):
 
 def verdict(befores, afters, passed, failed):
     """The first failing gate, from the three runs of each side, or the two lists."""
-    first_before, first_after = befores[0] or {}, afters[0] or {}
+    # Agreement first: a first run's label means nothing when the reruns differ.
+    if any(r is None for r in befores + afters) or any(r != befores[0] for r in befores) or any(r != afters[0] for r in afters):
+        return {"verdict": "reruns disagreed"}
+    first_before, first_after = befores[0], afters[0]
     f2p, p2p = lists(first_before, first_after, passed, failed)
     if not f2p:
         # A hidden test that fails on both sides is one the gold patch did not make pass;
         # with none, every hidden test already passed before it.
         both = [t for t in set(first_before) | set(first_after) if failed(t, first_before) and failed(t, first_after)]
         return {"verdict": "did not pass after" if both else "did not fail before"}
-    if any(r is None for r in befores + afters) or any(r != befores[0] for r in befores) or any(r != afters[0] for r in afters):
-        return {"verdict": "reruns disagreed"}
     return {"verdict": "passed", "FAIL_TO_PASS": f2p, "PASS_TO_PASS": p2p}
 
 

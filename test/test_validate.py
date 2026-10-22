@@ -32,6 +32,9 @@ class Verdict(unittest.TestCase):
         self.assertEqual(verdict([BEFORE] * 3, [AFTER, AFTER, flaky], passed, failed)["verdict"], "reruns disagreed")
         self.assertEqual(verdict([BEFORE, BEFORE, None], [AFTER] * 3, passed, failed)["verdict"], "reruns disagreed")
         self.assertEqual(verdict([BEFORE] * 3, [AFTER, None, AFTER], passed, failed)["verdict"], "reruns disagreed")
+        # A first pair with nothing that turns green still reports the disagreement.
+        green = {"t::new": "PASSED", "t::old": "PASSED"}
+        self.assertEqual(verdict([green, BEFORE, BEFORE], [green, AFTER, AFTER], passed, failed)["verdict"], "reruns disagreed")
 
 
 if __name__ == "__main__":

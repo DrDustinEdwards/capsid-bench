@@ -11,9 +11,8 @@
 set -euo pipefail
 report="$1"; score="$2"; dir="$3"; out="$4"
 [ -n "${SEAL_T:-}" ] || { echo "set the repo variable SEAL_T (T_seal, set at registration)" >&2; exit 1; }
-mods="${RUNNER_TEMP}/seal-modules"
-npm install --no-save --silent --prefix "${mods}" tlock-js@0.9.0 sigstore@4.1.1
-SEAL_MODULES="${mods}/node_modules" node scripts/seal.mjs seal --t "${SEAL_T}" --report "${report}" --score "${score}" --dir "${dir}" --out "${out}"
+npm ci --silent --ignore-scripts --prefix tools
+SEAL_MODULES="${PWD}/tools/node_modules" node scripts/seal.mjs seal --t "${SEAL_T}" --report "${report}" --score "${score}" --dir "${dir}" --out "${out}"
 
 # The push. Up to four runs score at once, so a rejected push fetches and tries again.
 repo="${RUNNER_TEMP}/sealed-branch"

@@ -22,5 +22,8 @@ jobs:
         run: |
           set -euo pipefail
           [ -n "${SECOND_READER_URL}" ] && [ -n "${SECOND_READER_KEY}" ] || { echo "set SECOND_READER_URL and SECOND_READER_KEY first" >&2; exit 1; }
+          # The walk's own check (scripts/walk.mjs secondReaderConfig): HTTPS, and not Anthropic.
+          [[ "${SECOND_READER_URL}" == https://* ]] || { echo "SECOND_READER_URL must be https" >&2; exit 1; }
+          if grep -qiE 'anthropic|claude' <<< "${SECOND_READER_URL}"; then echo "the second reader's vendor is not Anthropic" >&2; exit 1; fi
           curl -fsS -H "Authorization: Bearer ${SECOND_READER_KEY}" "${SECOND_READER_URL%/chat/completions}/models" |
             jq -r '.data[] | "\(.id)\t\(.created // "" | tostring)"' | sort | tee -a "$GITHUB_STEP_SUMMARY"

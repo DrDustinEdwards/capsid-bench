@@ -87,17 +87,38 @@ export function bodyAt(issue, before) {
 
 const ISSUE = `query($owner: String!, $name: String!, $issue: Int!, $pr: Int!) {
   repository(owner: $owner, name: $name) {
-    issue(number: $issue) { body createdAt lastEditedAt userContentEdits(last: 100) { nodes { editedAt diff } } }
+    issue(number: $issue) { body createdAt lastEditedAt userContentEdits(last: 100) { nodes { editedAt diff } pageInfo { hasPreviousPage startCursor } } }
     pullRequest(number: $pr) { commits(first: 1) { totalCount nodes { commit { committedDate authoredDate } } } }
   }
 }`;
 
+const EDITS = `query($owner: String!, $name: String!, $issue: Int!, $before: String!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $issue) { userContentEdits(last: 100, before: $before) { nodes { editedAt diff } pageInfo { hasPreviousPage startCursor } } }
+  }
+}`;
+
+// The edit history comes 100 at a time, newest first. Page back until an edit at or
+// before the first fix is in hand, or the history is complete, so bodyAt never reads a
+// later snapshot because the one it needed was on an older page.
+export async function editsBack(gh, vars, edits, before) {
+  let page = edits;
+  const nodes = [...(edits?.nodes ?? [])];
+  while (page?.pageInfo?.hasPreviousPage && !nodes.some((e) => e && e.editedAt <= before)) {
+    const data = await gh.graphql(EDITS, { ...vars, before: page.pageInfo.startCursor });
+    page = data.repository.issue.userContentEdits;
+    nodes.unshift(...(page?.nodes ?? []));
+  }
+  return { nodes };
+}
+
 export async function prepare(gh, candidate, recipe) {
   const [owner, name] = candidate.repo.split("/");
   const data = await gh.graphql(ISSUE, { owner, name, issue: candidate.issue.number, pr: candidate.pr });
-  const { issue, pullRequest } = data.repository;
+  const { pullRequest } = data.repository;
   const firstCommit = pullRequest.commits.nodes[0]?.commit;
   const firstFix = firstCommit ? [firstCommit.committedDate, firstCommit.authoredDate].sort()[0] : candidate.merged_at;
+  const issue = { ...data.repository.issue, userContentEdits: await editsBack(gh, { owner, name, issue: candidate.issue.number }, data.repository.issue.userContentEdits, firstFix) };
 
   const base = await findBase(candidate, pullRequest.commits.totalCount, {
     filesBetween: async (a, b) => splitDiff(await gh.diff(`/repos/${candidate.repo}/compare/${a}...${b}`)).map((p) => p.path),

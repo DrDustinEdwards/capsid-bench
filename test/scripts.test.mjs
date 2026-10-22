@@ -6,7 +6,7 @@ import { allowed, startProxy } from "../scripts/egress-proxy.mjs";
 import { candidates, imageFor, taskFromRow, testList } from "../scripts/load-swe.mjs";
 import { jobBody } from "../scripts/post-job.mjs";
 import { buildReport, modelFailure } from "../scripts/report.mjs";
-import { countsFromReport, emptyDiffScore } from "../scripts/score.mjs";
+import { countsFromReport, emptyDiffScore, testOutcome } from "../scripts/score.mjs";
 import { signedRequest } from "../scripts/sign-post.mjs";
 import { checkTask } from "../scripts/task.mjs";
 import { verifierResult } from "../scripts/verifier-message.mjs";
@@ -316,4 +316,11 @@ test("the second reader's non-marking share counts every response it gave, whate
     { event: "audit", reader: "second", task_id: "sample__b-3", decision: "none" },
   ];
   assert.deepEqual(nonMarkingShare(audit), { audited: 3, none: 2, share: 2 / 3 });
+});
+
+test("an own-task test command that docker could not run is a machine failure, not a failed test", () => {
+  assert.equal(testOutcome(0), "pass");
+  assert.equal(testOutcome(1), "fail");
+  assert.equal(testOutcome(125), "machine");
+  assert.equal(testOutcome(null), "machine");
 });
