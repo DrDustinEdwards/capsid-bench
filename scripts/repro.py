@@ -43,6 +43,16 @@ def split_diff(diff, path):
     return mine[0], "".join(rest)
 
 
+def without_task_tests(test_cmd, task):
+    """The recipe's test command without the task's own test files. Some recipes name
+    them; here they would run nothing of the agent's, and a file the hidden test patch
+    adds does not exist, so pytest stops on "file or directory not found" before it
+    reaches the agent's file."""
+    files = {name.split("::")[0] for name in task["fail_to_pass"] + task["pass_to_pass"]}
+    words = " ".join(test_cmd) if isinstance(test_cmd, list) else test_cmd
+    return " ".join(w for w in words.split() if w.split("::")[0] not in files)
+
+
 def error_line(log):
     """The test command's last error line in an eval log, else its last line."""
     body = log.split(">>>>> Start Test Output")[-1].split(">>>>> End Test Output")[0]
@@ -59,12 +69,11 @@ def verdict(base, base_log, head):
     if not failed:
         # What the base run did see, so the agent can tell a test that passed from one
         # that was skipped or never collected. These are its own tests, never hidden ones.
-        seen = ", ".join(f"{sum(1 for s in base.values() if s == k)} {k.lower()}" for k in sorted(set(base.values())))
-        if not seen:
-            # Nothing the parser could read: quote the run's last error line, which is from the
-            # agent's own test's output (the only test file in this run), not a hidden one.
-            seen = f"no tests; it ended with: {error_line(base_log)[:200]}"
-        return False, f"your test did not fail on the base (the base run saw: {seen})"
+        seen = ", ".join(f"{sum(1 for s in base.values() if s == k)} {k.lower().rstrip(':')}" for k in sorted(set(base.values())))
+        # Quote the run's last error line too: this run held only the agent's own test
+        # file, so the line is its own output, never a hidden test's. pytest's "ERROR: file
+        # or directory not found" reads as one error, and only the line says which.
+        return False, f"your test did not fail on the base (the base run saw: {seen or 'no tests'}; it ended with: {error_line(base_log)[:200]})"
     real = [t for t in failed if not any(t in line and NOT_A_REPRODUCTION.search(line) for line in base_log.splitlines())]
     if not real:
         return False, "your test failed on the base only on an import or syntax error, not on the issue"
@@ -116,6 +125,9 @@ def check(task, diff, name):
     instance = load_swebench_dataset(task["harness"]["dataset"], task["harness"]["split"], [task["task_id"]])[0]
     instance = _clean_install_config(instance)
     instance["test_patch"] = mine
+    config = instance.get("install_config")
+    if isinstance(config, dict) and config.get("test_cmd"):
+        config["test_cmd"] = without_task_tests(config["test_cmd"], task)
     spec = make_test_spec(instance, namespace=None)
     parse = lambda path: get_logs_eval(spec, path)
     base, base_log = run(task["image"], spec.eval_script, None, parse)
