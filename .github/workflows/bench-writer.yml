@@ -1,0 +1,150 @@
+name: bench-writer
+
+# DEVELOPMENT ONLY, on excluded tasks (protocol section 5's exclusion list). A second
+# agent writes tests from the issue alone, never seeing a fix, and saved runs' diffs are
+# scored against them (scripts/writer-check.py). It asks whether such tests would catch
+# a partial fix before the treatment is changed to use them. It is not a bench run:
+# Capsid opens no run and the result touches no score.
+#
+# PUBLIC REPOSITORY. The saved runs are unlocked with the bench key inside this job;
+# the log shows the writer's test counts and how many each diff fails, never a claim, a
+# transcript or a hidden test result.
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: The task, as named by its file in tasks/ (split "excluded" only).
+        required: true
+      runs:
+        description: Saved runs to score, as capsid_run_id=github_run_id pairs, comma separated.
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  TASK_ID: ${{ inputs.task_id }}
+  RUNS: ${{ inputs.runs }}
+  MODEL: claude-sonnet-5-5
+  EFFORT: high
+  WRITER_TURNS: 40
+  WRITER_MINUTES: 20
+  CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
+  HARNESS: git+https://github.com/SWE-rebench/SWE-bench-fork@e4907b7a90eafaa1f0a6428fd04fe31cdd8b4284
+  NODE_IMAGE: node:26.11.1-bookworm@sha256:f1233c415b41ffcf237c717b3dea92e9d4ea006e0e4c71edcb790605d74f5404
+
+jobs:
+  writer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Refuse a stray API key, a study task or malformed input
+        env:
+          STRAY_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${STRAY_KEY}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY is set; remove it" >&2; exit 1; fi
+          [[ "${TASK_ID}" =~ ^[A-Za-z0-9._-]{1,200}$ ]] || { echo "malformed task id" >&2; exit 1; }
+          [ -f "tasks/${TASK_ID}.json" ] || { echo "no tasks/${TASK_ID}.json" >&2; exit 1; }
+          [ "$(node -p 'require(process.argv[1]).split' "./tasks/${TASK_ID}.json")" = excluded ] || { echo "only an excluded task" >&2; exit 1; }
+          [[ "${RUNS}" =~ ^bench_[a-z0-9]+=[0-9]+(,bench_[a-z0-9]+=[0-9]+)*$ ]] || { echo "malformed runs" >&2; exit 1; }
+          [ -n "${CLAUDE_CODE_VERSION}" ] || { echo "set CLAUDE_CODE_VERSION" >&2; exit 1; }
+
+      - name: Stage the task
+        id: task
+        run: node scripts/task.mjs stage "tasks/${TASK_ID}.json" "${RUNNER_TEMP}/stage"
+
+      - name: Install Claude Code (pinned)
+        id: claude
+        run: |
+          set -euo pipefail
+          curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_CODE_VERSION}"
+          echo "bin=$(readlink -f "${HOME}/.local/bin/claude")" >> "$GITHUB_OUTPUT"
+
+      - name: Start the egress proxy and the task container
+        id: ready
+        env:
+          IMAGE: ${{ steps.task.outputs.image }}
+          CLAUDE_BIN: ${{ steps.claude.outputs.bin }}
+        run: |
+          set -euo pipefail
+          docker pull --quiet "${IMAGE}"
+          docker network create --internal bench-internal
+          docker run -d --name proxy -e ALLOW=api.anthropic.com -v "${GITHUB_WORKSPACE}/scripts:/scripts:ro" "${NODE_IMAGE}" node /scripts/egress-proxy.mjs
+          docker network connect bench-internal proxy
+          docker run -d --name task --network bench-internal -v "${CLAUDE_BIN}:/usr/local/bin/claude:ro" \
+            -e HTTPS_PROXY=http://proxy:3128 -e HTTP_PROXY=http://proxy:3128 -e NO_PROXY=localhost,127.0.0.1 \
+            -e IS_SANDBOX=1 -e DISABLE_AUTOUPDATER=1 -e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+            --entrypoint sleep "${IMAGE}" infinity
+          docker exec task git config --system --add safe.directory /testbed
+          echo "base=$(scripts/flatten-repo.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Run the writer
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set +e -uo pipefail
+          node -e 'import("./scripts/issue.mjs").then(({ withIssue }) => { const t = require(process.argv[1]); process.stdout.write(withIssue("writer.md", t.problem_statement, t.task_id)); })' "./tasks/${TASK_ID}.json" > "${RUNNER_TEMP}/first.md"
+          timeout "${WRITER_MINUTES}m" docker exec -e CLAUDE_CODE_OAUTH_TOKEN -w /testbed task \
+            claude -p "$(cat "${RUNNER_TEMP}/first.md")" \
+              --model "${MODEL}" --effort "${EFFORT}" --max-turns "${WRITER_TURNS}" --output-format json --dangerously-skip-permissions \
+            > "${RUNNER_TEMP}/writer.json"
+          echo "writer exited $?"
+          node -e 'try { const r = require(process.argv[1]); const u = r.usage ?? {}; console.log(`turns ${r.num_turns}, input ${u.input_tokens}, output ${u.output_tokens}, cache read ${u.cache_read_input_tokens}, cache write ${u.cache_creation_input_tokens}${r.is_error ? `, stopped: ${r.subtype}` : ""}`); } catch { console.log("no result"); }' "${RUNNER_TEMP}/writer.json"
+
+      - name: Take the writer's new files
+        env:
+          BASE: ${{ steps.ready.outputs.base }}
+        run: |
+          set -uo pipefail
+          docker exec task sh -c 'cd /testbed && git add -A && git diff --cached --binary --diff-filter=A "$0"' "${BASE}" > "${RUNNER_TEMP}/writer.patch" || true
+          grep '^diff --git' "${RUNNER_TEMP}/writer.patch" || echo "no new files"
+          docker rm -f task proxy > /dev/null
+
+      - name: Install the benchmark harness
+        run: |
+          set -euo pipefail
+          python3 -m venv "${RUNNER_TEMP}/venv"
+          "${RUNNER_TEMP}/venv/bin/pip" install --quiet "${HARNESS}"
+
+      - name: Fetch and unlock the saved runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BENCH_KEY: ${{ secrets.BENCH_KEY }}
+        run: |
+          set -euo pipefail
+          : > "${RUNNER_TEMP}/diffs.txt"
+          IFS=, read -ra PAIRS <<< "${RUNS}"
+          for pair in "${PAIRS[@]}"; do
+            id=${pair%%=*}; gh_run=${pair#*=}
+            gh run download "${gh_run}" -R "${GITHUB_REPOSITORY}" -n run -D "${RUNNER_TEMP}/saved/${id}"
+            RUN_ID="${id}" node scripts/seal.mjs unpack "${RUNNER_TEMP}/saved/${id}/run.lock" "${RUNNER_TEMP}/saved/${id}/run"
+            echo "${id}=${RUNNER_TEMP}/saved/${id}/run/diff.patch" >> "${RUNNER_TEMP}/diffs.txt"
+          done
+
+      - name: Score the saved diffs against the writer's tests
+        run: |
+          set -euo pipefail
+          mapfile -t DIFFS < "${RUNNER_TEMP}/diffs.txt"
+          PATH="${RUNNER_TEMP}/venv/bin:${PATH}" python3 scripts/writer-check.py "tasks/${TASK_ID}.json" "${RUNNER_TEMP}/writer.patch" "${RUNNER_TEMP}/writer-check.json" "${DIFFS[@]}"
+
+      - name: Upload the writer's tests and the counts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: writer
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/writer.patch
+            ${{ runner.temp }}/writer-check.json
