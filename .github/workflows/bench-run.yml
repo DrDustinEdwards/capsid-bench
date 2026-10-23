@@ -190,6 +190,12 @@ jobs:
           # The claim tool both arms (and the planted arms) record their claim with.
           docker cp scripts/bench-claim.sh task:/usr/local/bin/bench-claim
           docker exec task chmod 755 /usr/local/bin/bench-claim
+          # The treatment's reproduction tool (protocol section 2): it names the new test
+          # the harness checks at the phase break.
+          if [ "${ARM}" = treatment ]; then
+            docker cp scripts/bench-repro.sh task:/usr/local/bin/bench-repro
+            docker exec task chmod 755 /usr/local/bin/bench-repro
+          fi
           # Only now is the machine known to be ready. Without this, a run whose image
           # never pulled would score as an empty diff instead of being unjudged.
           echo "ok=1" >> "$GITHUB_OUTPUT"
@@ -289,6 +295,8 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           SESSION: ${{ steps.turn1.outputs.session }}
           BASE: ${{ steps.ready.outputs.base }}
+          BENCH_KEY: ${{ secrets.BENCH_KEY }}
+          RUN_ID: ${{ steps.open.outputs.run_id }}
         run: |
           set -uo pipefail
           if [ -f "${RUNNER_TEMP}/timed-out" ]; then echo "phase one ran out of time, so the verifier message is not delivered"; exit 0; fi
@@ -300,6 +308,18 @@ jobs:
           env -u CLAUDE_CODE_OAUTH_TOKEN PATH="${RUNNER_TEMP}/venv/bin:${PATH}" \
             node scripts/score.mjs "tasks/${TASK_ID}.json" "${RUNNER_TEMP}/diff.patch" "${RUNNER_TEMP}/verify.json"
           node scripts/verifier-message.mjs "${RUNNER_TEMP}/verify.json" > "${RUNNER_TEMP}/verifier.md"
+          # The treatment's reproduction check (protocol section 2, "Prove it before done"),
+          # also outside both clocks: the named test on the base with only that file, then
+          # on the diff. Capsid keeps the receipt, and the run key's complete needs it to
+          # have passed. It is not the claim, and the scorer never reads it.
+          if [ "${ARM}" = treatment ]; then
+            docker cp task:/var/bench/repro "${RUNNER_TEMP}/repro-name" 2>/dev/null || : > "${RUNNER_TEMP}/repro-name"
+            env -u CLAUDE_CODE_OAUTH_TOKEN PATH="${RUNNER_TEMP}/venv/bin:${PATH}" \
+              python3 scripts/repro.py "tasks/${TASK_ID}.json" "${RUNNER_TEMP}/diff.patch" "${RUNNER_TEMP}/repro-name" "${RUNNER_TEMP}/repro.json"
+            node -e 'const r=require(process.argv[1]); require("fs").writeFileSync(process.argv[2], JSON.stringify({run_id: process.argv[3], ...r}))' \
+              "${RUNNER_TEMP}/repro.json" "${RUNNER_TEMP}/repro-post.json" "${RUN_ID}"
+            BENCH_KEY="${BENCH_KEY}" node scripts/sign-post.mjs /bench/repro "${RUNNER_TEMP}/repro-post.json" > /dev/null || echo "could not post the reproduction receipt"
+          fi
           # The delivery mark: the claim file as it stood when the verifier message went
           # in. Only lines after it count (scripts/read-claims.mjs).
           scripts/copy-claims.sh "${RUNNER_TEMP}/claims-delivered.jsonl" || { echo "could not mark delivery"; exit 0; }
@@ -341,7 +361,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/run"
-          for f in diff.patch turn1.json turn2.json verify.json timed-out stopped-on-error claims-delivered.jsonl claims-final.jsonl claim.json; do
+          for f in diff.patch turn1.json turn2.json verify.json repro.json timed-out stopped-on-error claims-delivered.jsonl claims-final.jsonl claim.json; do
             [ -f "${RUNNER_TEMP}/${f}" ] && cp "${RUNNER_TEMP}/${f}" "${RUNNER_TEMP}/run/"
           done
           node scripts/seal.mjs pack "${RUNNER_TEMP}/run" "${RUNNER_TEMP}/run.lock"
