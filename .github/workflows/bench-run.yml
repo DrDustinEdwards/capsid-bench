@@ -150,7 +150,10 @@ jobs:
             MOUNTS+=(-v "${RUNNER_TEMP}/testbed:/testbed")
           fi
           docker network create --internal bench-internal
-          printf '%s\n' "${MOUNTS[@]+"${MOUNTS[@]}"}" > "${RUNNER_TEMP}/mounts.txt"
+          # Empty for a benchmark task: printf with no arguments would still write one
+          # empty line, which docker run then reads as an image name.
+          : > "${RUNNER_TEMP}/mounts.txt"
+          [ ${#MOUNTS[@]} -eq 0 ] || printf '%s\n' "${MOUNTS[@]}" > "${RUNNER_TEMP}/mounts.txt"
 
       - name: Install Claude Code (pinned)
         id: claude
