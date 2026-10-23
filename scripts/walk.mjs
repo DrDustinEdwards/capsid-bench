@@ -46,7 +46,7 @@ export const REASONS = {
   "issue-states-solution": "the frozen issue states the solution",
   "network-or-time": "the tests depend on network or time",
   ambiguous: "the issue is ambiguous between incompatible fixes",
-  "tests-reject-valid": "the tests would reject a fix that does what the issue asks (they check names, messages or behaviour the issue never states)",
+  "tests-reject-valid": "the issue states what a fix must do, and the tests reject a reasonable fix that does it, because they require an exact message, output or name that the issue neither gives nor requires and that such a fix could reasonably choose differently. A name the issue mentions, or one the tests call that clearly exists already, is not this reason",
 };
 
 // Fisher-Yates with the analysis script's seeded generator, over the frame's order.
