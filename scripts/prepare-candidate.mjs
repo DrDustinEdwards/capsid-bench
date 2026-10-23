@@ -149,7 +149,7 @@ export async function prepare(gh, candidate, recipe) {
 
 // The leakage screen (protocol section 4, step 4): the task is excluded if any added,
 // non-blank line of the gold patch, other than a line made only of brackets or
-// punctuation, occurs as a whole line in the frozen issue, after trimming whitespace; or
+// punctuation or a Markdown code fence (such as ```bash), occurs as a whole line in the frozen issue, after trimming whitespace; or
 // if any identifier the gold patch introduces occurs in the issue as a whole word.
 // `introduced` is that list (see introducedIdentifiers).
 export function leakage(patch, problem, introduced = []) {
@@ -158,7 +158,7 @@ export function leakage(patch, problem, introduced = []) {
   for (const line of patch.split("\n")) {
     if (!line.startsWith("+") || line.startsWith("+++")) continue;
     const text = line.slice(1).trim();
-    if (!text || /^[\p{P}\p{S}\s]*$/u.test(text)) continue;
+    if (!text || /^[\p{P}\p{S}\s]*$/u.test(text) || /^(```|~~~)[\w+-]*$/.test(text)) continue;
     if (issueLines.has(text)) matches.push(text);
   }
   const issueWords = new Set(problem.match(WORD) ?? []);

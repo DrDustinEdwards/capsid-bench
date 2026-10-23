@@ -71,7 +71,7 @@ test("the edit history is paged back until an edit at or before the first fix", 
 test("the leakage screen matches whole added lines, not punctuation", () => {
   const issue = "It breaks.\n  x = compute(2)  \n}\n";
   assert.deepEqual(leakage(DIFF, issue), ["x = compute(2)"]);
-  assert.deepEqual(leakage("+++ b/x\n+}\n+  \n+);\n", "}\n);\n"), []);
+  assert.deepEqual(leakage("+++ b/x\n+}\n+  \n+);\n+```bash\n", "}\n);\n```bash\n"), []);
   assert.deepEqual(leakage(DIFF, "x = compute(2) is the fix"), []);
 });
 
