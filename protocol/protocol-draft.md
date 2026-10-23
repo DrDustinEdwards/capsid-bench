@@ -1,6 +1,6 @@
 # Paired comparison: confirmatory protocol (DRAFT, not registered)
 
-Draft 2026-10-19, revised after three rounds of external review (Grok). Items marked **[DECISION]** are not yet decided by the author (Dustin Edwards). Decided 2026-10-19: the paper is split (this study is the only article) and the arms are the method comparison. Nothing in this file has been run. It will be hashed into the OSF registration together with the files listed in section 9.
+Draft 2026-10-19, revised after four rounds of external review (Grok). The fourth review (2026-10-23, on commit 4df32e2) accepted it in principle with no new flaws; the fields marked **[set at registration]** are filled in when the registration is hashed. Decided 2026-10-19: the paper is split (this study is the only article) and the arms are the method comparison. Nothing in this file has been run. It will be hashed into the OSF registration together with the files listed in section 9.
 
 ## 1. Question
 
