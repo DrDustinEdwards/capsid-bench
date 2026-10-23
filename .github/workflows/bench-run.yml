@@ -256,7 +256,9 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          set -uo pipefail
+          # Not -e (GitHub's default shell has it): the agent's exit code, 124 for the clock,
+          # is read below, and -e would end the step before it is.
+          set +e -uo pipefail
           ARGS=(-e CLAUDE_CODE_OAUTH_TOKEN)
           MCP=()
           if [ "${ARM}" = treatment ]; then CAPSID_RUN_KEY=$(cat "${RUNNER_TEMP}/run-key"); export CAPSID_RUN_KEY; ARGS+=(-e CAPSID_RUN_KEY); MCP=(--mcp-config /tmp/mcp.json); fi
@@ -267,6 +269,8 @@ jobs:
             > "${RUNNER_TEMP}/turn1.json"
           code=$?
           [ "${code}" = 0 ] || echo "phase one exited ${code}"
+          # Why Claude Code stopped, for an error stop only: its error text, never the agent's output.
+          node -e 'try { const r = require(process.argv[1]); if (r.is_error) console.log(`phase one stopped: ${r.subtype}: ${String(r.result ?? "").slice(0, 300)}`); } catch {}' "${RUNNER_TEMP}/turn1.json"
           scripts/stop-agent.sh "${code}" "${RUNNER_TEMP}/timed-out"
           # An error stop (a usage limit or a transport error, not told apart) ends the run
           # like a clock kill: no verifier message, scored from the diff, and Capsid decides
@@ -329,6 +333,8 @@ jobs:
           ARGS=(-e CLAUDE_CODE_OAUTH_TOKEN)
           MCP=()
           if [ "${ARM}" = treatment ]; then CAPSID_RUN_KEY=$(cat "${RUNNER_TEMP}/run-key"); export CAPSID_RUN_KEY; ARGS+=(-e CAPSID_RUN_KEY); MCP=(--mcp-config /tmp/mcp.json); fi
+          # Not -e from here (GitHub's default shell has it): the exit code is read below.
+          set +e
           timeout "${PHASE2_MINUTES}m" docker exec "${ARGS[@]}" -w /testbed task \
             claude -p "$(cat "${RUNNER_TEMP}/verifier.md")" --resume "${SESSION}" \
               --append-system-prompt "$(cat "${RUNNER_TEMP}/system.md")" "${MCP[@]+"${MCP[@]}"}" \
@@ -336,6 +342,8 @@ jobs:
             > "${RUNNER_TEMP}/turn2.json"
           code=$?
           [ "${code}" = 0 ] || echo "phase two exited ${code}"
+          # Why Claude Code stopped, for an error stop only: its error text, never the agent's output.
+          node -e 'try { const r = require(process.argv[1]); if (r.is_error) console.log(`phase two stopped: ${r.subtype}: ${String(r.result ?? "").slice(0, 300)}`); } catch {}' "${RUNNER_TEMP}/turn2.json"
           scripts/stop-agent.sh "${code}" "${RUNNER_TEMP}/timed-out"
           if [ "$(node -p 'try { require(process.argv[1]).subtype ?? "" } catch { "" }' "${RUNNER_TEMP}/turn2.json")" = error_during_execution ]; then
             scripts/stop-agent.sh error "${RUNNER_TEMP}/stopped-on-error"
