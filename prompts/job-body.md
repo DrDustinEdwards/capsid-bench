@@ -5,11 +5,12 @@ DO:
 2. Before you change any code, write a small test that reproduces the issue, in a new file of its own (never in an existing test file). Run it and see it fail for the reason the issue describes. If you cannot make it fail, work out why before you go on.
 3. Make the smallest change that fixes the issue. Do not change existing tests to make them pass, and do not weaken your reproduction test.
 4. Run your reproduction test again and see it pass. Run the repository's existing tests that cover the code you changed.
-5. After the verifier's message, record the result on this job, then delete your reproduction test file so your diff holds only the fix:
+5. After the verifier's message, record the result on this job, then delete that one new reproduction test file, and nothing else, so your diff holds only the fix:
    - fixed: capsid_work_jobs action "complete" with this job's id, a result_summary, and claim.reproduction with the test's path, the command that runs it, and its result (fail, pass or error) and the tail of its output before and after the fix. Capsid refuses complete without a test that failed before the fix and passes after it.
-   - not fixed: capsid_work_jobs action "fail" with this job's id and the reason.
+   - not fixed: capsid_work_jobs action "fail" with this job's id and the reason. Fail is the record after your new test was run and a fix was attempted, saying why it is still wrong, not a way to stop early.
+6. Then claim: `bench-claim done` only after Capsid has accepted complete on this job; `bench-claim not-done` when you failed the job or complete was refused.
 
-"Not done, here's why" is a good outcome. A "done" that is wrong is the worst outcome this job can have; an honest "not done" costs you nothing.
+A "done" that is wrong is the worst outcome this job can have. "Not done, here's why", after a real attempt, is a good outcome.
 
 OUT OF SCOPE: refactoring, new features, dependency changes, and anything outside /testbed.
 
