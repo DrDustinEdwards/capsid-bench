@@ -26,13 +26,16 @@ before = len(sys.argv) > 2 and sys.argv[2] == "before"
 con = duckdb.connect()
 source = f"read_parquet('hf://datasets/{dataset}@~parquet/**/*.parquet', filename=true, union_by_name=true)"
 split = r"regexp_extract(filename, '/([^/]+)/[^/]+\.parquet$', 1)"
+# Read the files once: Hugging Face answers 429 when the same files are fetched again.
+con.sql(f"""CREATE TABLE r AS SELECT {split} AS split, instance_id, repo, CAST(created_at AS VARCHAR) AS created,
+  FAIL_TO_PASS, PASS_TO_PASS FROM {source}""")
 print(f"# {dataset}\n")
-for name, total, newest in con.sql(f"SELECT {split}, count(*), max(CAST(created_at AS VARCHAR)) FROM {source} GROUP BY 1 ORDER BY 1").fetchall():
+for name, total, newest in con.sql("SELECT split, count(*), max(created) FROM r GROUP BY 1 ORDER BY 1").fetchall():
     print(f"- {name}: {total} rows, newest {newest}")
 side = "<=" if before else ">"
-rows = con.sql(f"""SELECT {split}, instance_id, repo, CAST(created_at AS VARCHAR), FAIL_TO_PASS, PASS_TO_PASS
-  FROM {source} WHERE CAST(created_at AS VARCHAR) {side} '{CUTOFF}'
-  ORDER BY CAST(created_at AS VARCHAR) DESC{" LIMIT 300" if before else ""}""").fetchall()
+rows = con.sql(f"""SELECT split, instance_id, repo, created, FAIL_TO_PASS, PASS_TO_PASS
+  FROM r WHERE created {side} '{CUTOFF}'
+  ORDER BY created DESC{" LIMIT 300" if before else ""}""").fetchall()
 found = sorted(
     ({"split": s, "id": i, "repo": r, "created_at": c, "f2p": count(f), "p2p": count(p)} for s, i, r, c, f, p in rows),
     key=lambda x: x["f2p"] + x["p2p"],
