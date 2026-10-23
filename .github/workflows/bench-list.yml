@@ -35,5 +35,5 @@ jobs:
           WHEN: ${{ inputs.when }}
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet duckdb==1.2.2
+          python3 -m pip install --quiet duckdb==1.5.5
           python3 scripts/list-hf.py "${DATASET}" "${WHEN}" | tee -a "$GITHUB_STEP_SUMMARY"
