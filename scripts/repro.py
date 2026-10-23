@@ -43,6 +43,14 @@ def split_diff(diff, path):
     return mine[0], "".join(rest)
 
 
+def error_line(log):
+    """The test command's last error line in an eval log, else its last line."""
+    body = log.split(">>>>> Start Test Output")[-1].split(">>>>> End Test Output")[0]
+    lines = [l.strip() for l in body.splitlines() if l.strip() and not l.startswith("+ ")]
+    errors = [l for l in lines if re.search(r"Error|ERROR", l) and not l.startswith("=")]
+    return (errors or lines or ["(none)"])[-1]
+
+
 def verdict(base, base_log, head):
     """(passed, reason) from the parser's two status maps, or None for a run it could not read."""
     if base is None:
@@ -52,7 +60,11 @@ def verdict(base, base_log, head):
         # What the base run did see, so the agent can tell a test that passed from one
         # that was skipped or never collected. These are its own tests, never hidden ones.
         seen = ", ".join(f"{sum(1 for s in base.values() if s == k)} {k.lower()}" for k in sorted(set(base.values())))
-        return False, f"your test did not fail on the base (the base run saw: {seen or 'no tests'})"
+        if not seen:
+            # Nothing the parser could read: quote the run's last error line, which is from the
+            # agent's own test's output (the only test file in this run), not a hidden one.
+            seen = f"no tests; it ended with: {error_line(base_log)[:200]}"
+        return False, f"your test did not fail on the base (the base run saw: {seen})"
     real = [t for t in failed if not any(t in line and NOT_A_REPRODUCTION.search(line) for line in base_log.splitlines())]
     if not real:
         return False, "your test failed on the base only on an import or syntax error, not on the issue"
