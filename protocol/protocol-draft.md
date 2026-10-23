@@ -75,7 +75,10 @@ How the script reads these terms (scripts/candidates.mjs): "fixes an issue" mean
    - the tests do not test the issue;
    - the frozen issue states the solution (example: it names the exact line to change and its replacement);
    - the tests depend on network or time;
-   - the issue is ambiguous between incompatible fixes.
+   - the issue is ambiguous between incompatible fixes;
+   - the tests would reject a fix that does what the issue asks (they check names, messages or behaviour the issue never states).
+
+   **Fifth reason (decided 2026-10-23).** In the excluded development rounds, 4 of the baseline's 5 false claims came from tasks whose hidden tests check text, names or behaviour the issue never states, which no method can meet and which none of the first four reasons covers. The reason follows the second screening question of SWE-bench Verified (whether the FAIL_TO_PASS tests reject valid solutions).
 
    **Audit (decided 2026-10-21).** The frozen candidate list is hashed before the seed is drawn. That hash does not include audit decisions. The registered seed permutes the list once. Candidates are considered in that order.
 
