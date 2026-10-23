@@ -49,8 +49,10 @@ found = sorted(
     # Practice wants the harder fixes first; the study keeps the cheapest test runs first.
     key=(lambda x: -x["size"][0]) if before else (lambda x: x["f2p"] + x["p2p"]),
 )
-found = [x for x in found if x["f2p"] > 0]
+# The dataset lists an instance under each split it falls in; keep its first row only.
+seen = set()
+found = [x for x in found if x["f2p"] > 0 and not (x["id"] in seen or seen.add(x["id"]))]
 print(f"\n{len(found)} {'of the newest 300 before' if before else 'after'} the cutoff with failing tests to fix\n")
-for x in found[:60]:
+for x in found[:120]:
     print(f"- {x['split']} | {x['id']} | {x['repo']} | {x['created_at']} | f2p {x['f2p']} p2p {x['p2p']}"
           f" | gold {x['size'][0]} lines in {x['size'][1]} files | issue {x['issue']} chars")
