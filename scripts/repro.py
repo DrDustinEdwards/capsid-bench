@@ -49,8 +49,10 @@ def verdict(base, base_log, head):
         return False, "the check could not run your test on the base"
     failed = sorted(t for t, s in base.items() if s == "FAILED")
     if not failed:
-        errored = [t for t, s in base.items() if s == "ERROR"]
-        return False, "your test did not fail on the base" + (" (it errored instead of failing)" if errored else "")
+        # What the base run did see, so the agent can tell a test that passed from one
+        # that was skipped or never collected. These are its own tests, never hidden ones.
+        seen = ", ".join(f"{sum(1 for s in base.values() if s == k)} {k.lower()}" for k in sorted(set(base.values())))
+        return False, f"your test did not fail on the base (the base run saw: {seen or 'no tests'})"
     real = [t for t in failed if not any(t in line and NOT_A_REPRODUCTION.search(line) for line in base_log.splitlines())]
     if not real:
         return False, "your test failed on the base only on an import or syntax error, not on the issue"
