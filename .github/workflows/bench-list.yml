@@ -1,8 +1,9 @@
 name: bench-list
 
 # List a dataset's instances opened after the model's cutoff, with their test counts, so
-# pilot and full ids can be chosen. Reads Hugging Face only: registers nothing, starts no
-# run, calls no model.
+# pilot and full ids can be chosen; or, with `when: before`, the newest ones opened before
+# it, for practice tasks (split excluded, protocol section 2). Reads Hugging Face only:
+# registers nothing, starts no run, calls no model.
 
 on:
   workflow_dispatch:
@@ -10,6 +11,11 @@ on:
       dataset:
         description: Hugging Face dataset
         default: nebius/SWE-rebench-leaderboard
+      when:
+        description: Instances opened after the cutoff, or before it (practice)
+        type: choice
+        options: [after, before]
+        default: after
 
 permissions:
   contents: read
@@ -26,7 +32,8 @@ jobs:
       - name: List the candidates
         env:
           DATASET: ${{ inputs.dataset }}
+          WHEN: ${{ inputs.when }}
         run: |
           set -euo pipefail
           python3 -m pip install --quiet duckdb==1.2.2
-          python3 scripts/list-hf.py "${DATASET}" | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 scripts/list-hf.py "${DATASET}" "${WHEN}" | tee -a "$GITHUB_STEP_SUMMARY"
