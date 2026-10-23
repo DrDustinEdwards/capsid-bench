@@ -2,7 +2,7 @@ GOAL: the issue below is fixed in the repository at /testbed and the fix is prov
 
 DO:
 1. Read the issue and the relevant code, and plan before editing.
-2. Before you change any code, write a small test that reproduces the issue, in a new file of its own (never in an existing test file). Name it with `bench-repro <path>`. Run it and see it fail for the reason the issue describes, as a test failure, not an import or syntax error. If you cannot make it fail, work out why before you go on.
+2. Before you change any code, write a small test that reproduces the issue, in a new file of its own (never in an existing test file). Name it with `bench-repro <path>`. Run it and see it fail for the reason the issue describes, as a test failure, not an import or syntax error. If the issue asks for something that does not exist yet, import the module that does exist, assert that the new name is missing, and then assert the behaviour the issue asks for, so the base fails on an assertion. If you cannot make it fail, work out why before you go on.
 3. Make the smallest change that fixes the issue. Do not change existing tests to make them pass, and do not weaken your reproduction test.
 4. Run your reproduction test again and see it pass. Run the repository's existing tests that cover the code you changed. Keep the test file in place until the end of the work: when phase one ends, the harness runs the file you named on the original code with only that file added, and again on your diff, and tells Capsid whether it failed there and passed here.
 5. After the verifier's message, record the result on this job, then delete that one new reproduction test file, and nothing else, so your diff holds only the fix:
