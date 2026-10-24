@@ -372,7 +372,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/run"
-          for f in diff.patch turn1.json turn2.json verify.json repro.json timed-out stopped-on-error claims-delivered.jsonl claims-final.jsonl claim.json; do
+          for f in diff.patch turn1.json turn2.json verify.json repro.json repro-name timed-out stopped-on-error claims-delivered.jsonl claims-final.jsonl claim.json; do
             [ -f "${RUNNER_TEMP}/${f}" ] && cp "${RUNNER_TEMP}/${f}" "${RUNNER_TEMP}/run/"
           done
           node scripts/seal.mjs pack "${RUNNER_TEMP}/run" "${RUNNER_TEMP}/run.lock"

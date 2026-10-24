@@ -1,0 +1,91 @@
+name: bench-mutants
+
+# DEVELOPMENT ONLY, on excluded tasks (protocol section 5's exclusion list). Replays the
+# mutant check (scripts/mutants.py) on saved treatment runs: the run's reproduction test
+# against broken copies of its own fix. It asks whether a fail-then-pass check plus
+# mutants would refuse the partial fixes the reproduction check lets through, before
+# the treatment is changed to use it. No model runs, Capsid opens no run, and the result
+# touches no score.
+#
+# PUBLIC REPOSITORY. The saved runs are unlocked with the bench key inside this job; the
+# log shows the check's counts and which mutants survived, never a claim, a transcript
+# or a hidden test result.
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: 'JSON list of "task_id=capsid_run_id=github_run_id" strings (split "excluded" only, treatment runs).'
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  HARNESS: git+https://github.com/SWE-rebench/SWE-bench-fork@e4907b7a90eafaa1f0a6428fd04fe31cdd8b4284
+
+jobs:
+  mutants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        run: ${{ fromJSON(inputs.runs) }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Refuse a study task or malformed input
+        id: input
+        env:
+          RUN: ${{ matrix.run }}
+        run: |
+          set -euo pipefail
+          [[ "${RUN}" =~ ^([A-Za-z0-9._-]{1,200})=(bench_[a-z0-9]+)=([0-9]+)$ ]] || { echo "malformed run" >&2; exit 1; }
+          task="${BASH_REMATCH[1]}"; id="${BASH_REMATCH[2]}"; gh_run="${BASH_REMATCH[3]}"
+          [ -f "tasks/${task}.json" ] || { echo "no tasks/${task}.json" >&2; exit 1; }
+          [ "$(node -p 'require(process.argv[1]).split' "./tasks/${task}.json")" = excluded ] || { echo "only an excluded task" >&2; exit 1; }
+          { echo "task=${task}"; echo "id=${id}"; echo "gh_run=${gh_run}"; } >> "$GITHUB_OUTPUT"
+
+      - name: Fetch and unlock the saved run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BENCH_KEY: ${{ secrets.BENCH_KEY }}
+          GH_RUN: ${{ steps.input.outputs.gh_run }}
+        run: |
+          set -euo pipefail
+          gh run download "${GH_RUN}" -R "${GITHUB_REPOSITORY}" -n run -D "${RUNNER_TEMP}/saved"
+          node scripts/seal.mjs unpack "${RUNNER_TEMP}/saved/run.lock" "${RUNNER_TEMP}/saved/run"
+          [ -s "${RUNNER_TEMP}/saved/run/diff.patch" ] || { echo "the saved run has no diff" >&2; exit 1; }
+          cp "${RUNNER_TEMP}/saved/run/diff.patch" "${RUNNER_TEMP}/fix.patch"
+          cp "${RUNNER_TEMP}/saved/run/repro-name" "${RUNNER_TEMP}/repro-name" 2>/dev/null || : > "${RUNNER_TEMP}/repro-name"
+          rm -rf "${RUNNER_TEMP}/saved"
+
+      - name: Install the benchmark harness
+        run: |
+          set -euo pipefail
+          python3 -m venv "${RUNNER_TEMP}/venv"
+          "${RUNNER_TEMP}/venv/bin/pip" install --quiet "${HARNESS}"
+
+      - name: Run the mutant check
+        env:
+          TASK: ${{ steps.input.outputs.task }}
+        run: |
+          set -euo pipefail
+          docker pull --quiet "$(node -p 'require(process.argv[1]).image' "./tasks/${TASK}.json")" > /dev/null
+          # A run saved before bench-run kept the repro name has none; the check then tries
+          # the new test files the diff adds.
+          PATH="${RUNNER_TEMP}/venv/bin:${PATH}" python3 scripts/mutants.py "tasks/${TASK}.json" "${RUNNER_TEMP}/fix.patch" "${RUNNER_TEMP}/repro-name" "${RUNNER_TEMP}/mutants.json"
+          node -e '
+            const r = require(process.argv[1]);
+            console.log(`${process.env.TASK} repro ${r.repro.passed ? "passed" : "not passed"}; killed ${r.killed} of ${r.valid} (${r.invalid} invalid)`);
+            for (const s of r.survivors) console.log(`  survived: ${s}`);
+          ' "${RUNNER_TEMP}/mutants.json"

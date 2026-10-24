@@ -85,8 +85,9 @@ def verdict(base, base_log, head):
     return True, f"your test failed on the base and passed on your diff ({len(real)} test{'s' if len(real) != 1 else ''})"
 
 
-def run(image, eval_script, patch, parse):
-    """One offline run, as scripts/validate.py does it, returning the status map and the log."""
+def run(image, eval_script, patch, parse, check_cmd=None):
+    """One offline run, as scripts/validate.py does it, returning the status map and the log.
+    check_cmd, run in the repository after the patch, must succeed or the run is None."""
     with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "eval.sh").write_text(eval_script)
         Path(tmp, "patch.diff").write_text(patch or "")
@@ -98,6 +99,8 @@ def run(image, eval_script, patch, parse):
                 subprocess.run(["docker", "cp", f"{tmp}/patch.diff", f"{name}:/tmp/patch.diff"], check=True, capture_output=True)
                 if subprocess.run(["docker", "exec", "-w", "/testbed", name, "git", "apply", "/tmp/patch.diff"], capture_output=True).returncode != 0:
                     return None, ""
+            if check_cmd and subprocess.run(["docker", "exec", "-w", "/testbed", name, "/bin/bash", "-c", check_cmd], capture_output=True).returncode != 0:
+                return None, ""
             try:
                 out = subprocess.run(["docker", "exec", name, "/bin/bash", "-c", "/bin/bash /eval.sh 2>&1"], capture_output=True, timeout=TIMEOUT)
             except subprocess.TimeoutExpired:
@@ -110,31 +113,42 @@ def run(image, eval_script, patch, parse):
             subprocess.run(["docker", "rm", "-f", name], capture_output=True)
 
 
-def check(task, diff, name):
-    if task.get("source") == "own":
-        return False, "this task has no reproduction check"
-    if not name:
-        return False, "no test was named with bench-repro"
-    mine, rest = split_diff(diff, name)
-    if mine is None:
-        return False, f"{name} is not a new file in your diff"
+def spec_for(task, test_patch):
+    """The harness's test spec with the agent's file as the only test patch, and its log parser."""
     from swebench.harness.grading import get_logs_eval
     from swebench.harness.test_spec.test_spec import make_test_spec
     from swebench.harness.utils import _clean_install_config, load_swebench_dataset
 
     instance = load_swebench_dataset(task["harness"]["dataset"], task["harness"]["split"], [task["task_id"]])[0]
     instance = _clean_install_config(instance)
-    instance["test_patch"] = mine
+    instance["test_patch"] = test_patch
     config = instance.get("install_config")
     if isinstance(config, dict) and config.get("test_cmd"):
         config["test_cmd"] = without_task_tests(config["test_cmd"], task)
     spec = make_test_spec(instance, namespace=None)
-    parse = lambda path: get_logs_eval(spec, path)
+    return spec, lambda path: get_logs_eval(spec, path)
+
+
+def base_and_head(task, diff, name):
+    """The check as (passed, reason), and for a later check the runs it read:
+    {"base", "head", "spec", "parse", "rest"}, empty when it never ran the test."""
+    if task.get("source") == "own":
+        return (False, "this task has no reproduction check"), {}
+    if not name:
+        return (False, "no test was named with bench-repro"), {}
+    mine, rest = split_diff(diff, name)
+    if mine is None:
+        return (False, f"{name} is not a new file in your diff"), {}
+    spec, parse = spec_for(task, mine)
     base, base_log = run(task["image"], spec.eval_script, None, parse)
     head = None
     if base is not None:
         head, _ = run(task["image"], spec.eval_script, rest or None, parse)
-    return verdict(base, base_log, head)
+    return verdict(base, base_log, head), {"base": base, "head": head, "spec": spec, "parse": parse, "rest": rest}
+
+
+def check(task, diff, name):
+    return base_and_head(task, diff, name)[0]
 
 
 def main():
