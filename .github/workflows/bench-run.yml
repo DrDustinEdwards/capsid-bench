@@ -477,6 +477,12 @@ jobs:
             --claim "${CLAIM}" --job "${JOB_ID}" --image-bytes "${IMAGE_BYTES}" --version "${VERSION}"
           POST="${RUNNER_TEMP}/report.json"
           SPLIT=$(node -p 'require(process.argv[1]).split' "${GITHUB_WORKSPACE}/tasks/${TASK_ID}.json")
+          # A practice (excluded) run's diff goes to Capsid with its report, so a miss can be
+          # read from what the agent changed. Capsid refuses a diff for any other split, and
+          # nothing here prints it.
+          if [ "${SPLIT}" = excluded ] && [ -s "${RUNNER_TEMP}/run/diff.patch" ]; then
+            node -e 'const fs = require("fs"); const [report, diff] = process.argv.slice(1); const r = JSON.parse(fs.readFileSync(report, "utf8")); r.diff = fs.readFileSync(diff, "utf8").slice(0, 262144); fs.writeFileSync(report, JSON.stringify(r))' "${RUNNER_TEMP}/report.json" "${RUNNER_TEMP}/run/diff.patch"
+          fi
           if [ "${SPLIT}" = full ] && { [ "${ARM}" = baseline ] || [ "${ARM}" = treatment ]; }; then
             mkdir -p "${RUNNER_TEMP}/sealed"
             POST="${RUNNER_TEMP}/sealed/redacted.json"
