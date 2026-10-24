@@ -197,8 +197,11 @@ def check(task, diff, name):
 
 
 def new_test_files(diff):
-    """The test-like files a diff adds, for a saved run that did not keep the name."""
-    return [f["path"] for f in parse(diff) if f["new"] and TESTLIKE.search(f["path"])]
+    """The new source files a diff adds, likeliest repro test first, for a saved run that
+    did not keep the name: test-like paths, then names with test or repro in them."""
+    added = [f["path"] for f in parse(diff) if f["new"] and SOURCE.search(f["path"])]
+    rank = lambda p: 0 if TESTLIKE.search(p) else 1 if re.search(r"test|repro", p.rsplit("/", 1)[-1], re.I) else 2
+    return sorted(added, key=rank)
 
 
 def main():
@@ -207,7 +210,7 @@ def main():
     diff = Path(diff_path).read_text() if Path(diff_path).exists() else ""
     name = Path(name_path).read_text().strip() if Path(name_path).exists() else ""
     names = [name] if name else new_test_files(diff)[:3]
-    result = {"repro": {"passed": False, "reason": "no new test file"}, "valid": 0, "killed": 0, "invalid": 0, "survivors": []}
+    result = {"repro": {"passed": False, "reason": "the diff adds no new source file"}, "valid": 0, "killed": 0, "invalid": 0, "survivors": []}
     for candidate in names:
         try:
             result = check(task, diff, candidate)
