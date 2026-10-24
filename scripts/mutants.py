@@ -196,25 +196,15 @@ def check(task, diff, name):
     return result
 
 
-def new_test_files(diff):
-    """The test-like files a diff adds, for a saved run that did not keep the name."""
-    return [f["path"] for f in parse(diff) if f["new"] and TESTLIKE.search(f["path"])]
-
-
 def main():
     task_path, diff_path, name_path, out_path = sys.argv[1:5]
     task = json.loads(Path(task_path).read_text())
     diff = Path(diff_path).read_text() if Path(diff_path).exists() else ""
     name = Path(name_path).read_text().strip() if Path(name_path).exists() else ""
-    names = [name] if name else new_test_files(diff)[:3]
-    result = {"repro": {"passed": False, "reason": "no new test file"}, "valid": 0, "killed": 0, "invalid": 0, "survivors": []}
-    for candidate in names:
-        try:
-            result = check(task, diff, candidate)
-        except Exception as err:  # the machine, not the agent: say so rather than guess
-            result = {**result, "repro": {"passed": False, "reason": f"the check itself failed ({type(err).__name__})"}}
-        if result["repro"]["passed"]:
-            break
+    try:
+        result = check(task, diff, name)
+    except Exception as err:  # the machine, not the agent: say so rather than guess
+        result = {"repro": {"passed": False, "reason": f"the check itself failed ({type(err).__name__})"}, "valid": 0, "killed": 0, "invalid": 0, "survivors": []}
     Path(out_path).write_text(json.dumps(result) + "\n")
     r = result
     print(f"repro {'passed' if r['repro']['passed'] else 'not passed'}; mutants killed {r['killed']} of {r['valid']} ({r['invalid']} invalid)")

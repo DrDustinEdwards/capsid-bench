@@ -59,13 +59,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BENCH_KEY: ${{ secrets.BENCH_KEY }}
+          RUN_ID: ${{ steps.input.outputs.id }}
           GH_RUN: ${{ steps.input.outputs.gh_run }}
         run: |
           set -euo pipefail
           gh run download "${GH_RUN}" -R "${GITHUB_REPOSITORY}" -n run -D "${RUNNER_TEMP}/saved"
           node scripts/seal.mjs unpack "${RUNNER_TEMP}/saved/run.lock" "${RUNNER_TEMP}/saved/run"
-          [ -s "${RUNNER_TEMP}/saved/run/diff.patch" ] || { echo "the saved run has no diff" >&2; exit 1; }
-          cp "${RUNNER_TEMP}/saved/run/diff.patch" "${RUNNER_TEMP}/fix.patch"
+          # The phase-one diff: the final one no longer holds the reproduction test, which
+          # the agent deletes after the verifier. Runs saved before bench-run kept it have none.
+          [ -s "${RUNNER_TEMP}/saved/run/diff-phase1.patch" ] || { echo "the saved run has no phase-one diff (saved before bench-run kept it)" >&2; exit 1; }
+          cp "${RUNNER_TEMP}/saved/run/diff-phase1.patch" "${RUNNER_TEMP}/fix.patch"
           cp "${RUNNER_TEMP}/saved/run/repro-name" "${RUNNER_TEMP}/repro-name" 2>/dev/null || : > "${RUNNER_TEMP}/repro-name"
           rm -rf "${RUNNER_TEMP}/saved"
 
@@ -81,11 +84,12 @@ jobs:
         run: |
           set -euo pipefail
           docker pull --quiet "$(node -p 'require(process.argv[1]).image' "./tasks/${TASK}.json")" > /dev/null
-          # A run saved before bench-run kept the repro name has none; the check then tries
-          # the new test files the diff adds.
           PATH="${RUNNER_TEMP}/venv/bin:${PATH}" python3 scripts/mutants.py "tasks/${TASK}.json" "${RUNNER_TEMP}/fix.patch" "${RUNNER_TEMP}/repro-name" "${RUNNER_TEMP}/mutants.json"
           node -e '
             const r = require(process.argv[1]);
-            console.log(`${process.env.TASK} repro ${r.repro.passed ? "passed" : "not passed"}; killed ${r.killed} of ${r.valid} (${r.invalid} invalid)`);
+            // The fixed words of the reason: a parenthesis can quote the test output, except
+            // in a failure of the check itself, which names only an exception type.
+            const why = (s) => (s.startsWith("the check itself") ? s : s.split(" (")[0]);
+            console.log(`${process.env.TASK} repro ${r.repro.passed ? "passed" : "not passed"} (${why(r.repro.reason)}); killed ${r.killed} of ${r.valid} (${r.invalid} invalid)`);
             for (const s of r.survivors) console.log(`  survived: ${s}`);
           ' "${RUNNER_TEMP}/mutants.json"

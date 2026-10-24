@@ -288,6 +288,10 @@ jobs:
           set -uo pipefail
           docker exec task sh -c 'cd /testbed && git add -A && git diff --cached --binary "$0"' "${BASE}" > "${RUNNER_TEMP}/diff.patch" || true
           wc -c "${RUNNER_TEMP}/diff.patch"
+          # Phase one's diff still holds the named reproduction test, which the agent deletes
+          # after the verifier (prompts/job-body.md step 5): kept so the mutant check
+          # (bench-mutants) can replay that test later.
+          cp "${RUNNER_TEMP}/diff.patch" "${RUNNER_TEMP}/diff-phase1.patch"
 
       - name: Install the benchmark harness (verifier)
         if: (inputs.arm == 'baseline' || inputs.arm == 'treatment') && steps.task.outputs.source != 'own'
@@ -372,7 +376,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/run"
-          for f in diff.patch turn1.json turn2.json verify.json repro.json repro-name timed-out stopped-on-error claims-delivered.jsonl claims-final.jsonl claim.json; do
+          for f in diff.patch diff-phase1.patch turn1.json turn2.json verify.json repro.json repro-name timed-out stopped-on-error claims-delivered.jsonl claims-final.jsonl claim.json; do
             [ -f "${RUNNER_TEMP}/${f}" ] && cp "${RUNNER_TEMP}/${f}" "${RUNNER_TEMP}/run/"
           done
           node scripts/seal.mjs pack "${RUNNER_TEMP}/run" "${RUNNER_TEMP}/run.lock"
