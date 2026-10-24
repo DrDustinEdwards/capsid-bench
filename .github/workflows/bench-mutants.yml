@@ -59,6 +59,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BENCH_KEY: ${{ secrets.BENCH_KEY }}
+          RUN_ID: ${{ steps.input.outputs.id }}
           GH_RUN: ${{ steps.input.outputs.gh_run }}
         run: |
           set -euo pipefail
