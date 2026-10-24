@@ -1,0 +1,133 @@
+name: bench-review
+
+# DEVELOPMENT ONLY, on excluded tasks (protocol section 5's exclusion list). A second
+# agent reads the issue and a saved run's final diff, never the run's transcript, claim
+# or hidden tests, and says whether the fix does everything the issue asks. It asks
+# whether such a reviewer would catch the partial fixes Capsid's reproduction check lets
+# through, before the treatment is changed to use one. It is not a bench run: Capsid
+# opens no run and the verdict touches no score.
+#
+# PUBLIC REPOSITORY. The saved runs are unlocked with the bench key inside this job; the
+# log shows the reviewer's verdict line and usage, never a claim, a transcript or a
+# hidden test result.
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: 'JSON list of "task_id=capsid_run_id=github_run_id" strings (split "excluded" only).'
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  MODEL: claude-sonnet-5-5
+  EFFORT: high
+  REVIEW_TURNS: 40
+  REVIEW_MINUTES: 20
+  CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
+  NODE_IMAGE: node:26.11.1-bookworm@sha256:f1233c415b41ffcf237c717b3dea92e9d4ea006e0e4c71edcb790605d74f5404
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        run: ${{ fromJSON(inputs.runs) }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Refuse a stray API key, a study task or malformed input
+        id: input
+        env:
+          STRAY_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RUN: ${{ matrix.run }}
+        run: |
+          set -euo pipefail
+          if [ -n "${STRAY_KEY}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY is set; remove it" >&2; exit 1; fi
+          [[ "${RUN}" =~ ^([A-Za-z0-9._-]{1,200})=(bench_[a-z0-9]+)=([0-9]+)$ ]] || { echo "malformed run" >&2; exit 1; }
+          task="${BASH_REMATCH[1]}"; id="${BASH_REMATCH[2]}"; gh_run="${BASH_REMATCH[3]}"
+          [ -f "tasks/${task}.json" ] || { echo "no tasks/${task}.json" >&2; exit 1; }
+          [ "$(node -p 'require(process.argv[1]).split' "./tasks/${task}.json")" = excluded ] || { echo "only an excluded task" >&2; exit 1; }
+          [ -n "${CLAUDE_CODE_VERSION}" ] || { echo "set CLAUDE_CODE_VERSION" >&2; exit 1; }
+          { echo "task=${task}"; echo "id=${id}"; echo "gh_run=${gh_run}"; } >> "$GITHUB_OUTPUT"
+
+      - name: Fetch and unlock the saved run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BENCH_KEY: ${{ secrets.BENCH_KEY }}
+          RUN_ID: ${{ steps.input.outputs.id }}
+          GH_RUN: ${{ steps.input.outputs.gh_run }}
+        run: |
+          set -euo pipefail
+          gh run download "${GH_RUN}" -R "${GITHUB_REPOSITORY}" -n run -D "${RUNNER_TEMP}/saved"
+          node scripts/seal.mjs unpack "${RUNNER_TEMP}/saved/run.lock" "${RUNNER_TEMP}/saved/run"
+          [ -s "${RUNNER_TEMP}/saved/run/diff.patch" ] || { echo "the saved run has no diff" >&2; exit 1; }
+          cp "${RUNNER_TEMP}/saved/run/diff.patch" "${RUNNER_TEMP}/fix.patch"
+          rm -rf "${RUNNER_TEMP}/saved"
+
+      - name: Stage the task
+        id: task
+        env:
+          TASK: ${{ steps.input.outputs.task }}
+        run: node scripts/task.mjs stage "tasks/${TASK}.json" "${RUNNER_TEMP}/stage"
+
+      - name: Install Claude Code (pinned)
+        id: claude
+        run: |
+          set -euo pipefail
+          curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_CODE_VERSION}"
+          echo "bin=$(readlink -f "${HOME}/.local/bin/claude")" >> "$GITHUB_OUTPUT"
+
+      - name: Start the egress proxy and the task container, with the fix applied
+        env:
+          IMAGE: ${{ steps.task.outputs.image }}
+          CLAUDE_BIN: ${{ steps.claude.outputs.bin }}
+        run: |
+          set -euo pipefail
+          docker pull --quiet "${IMAGE}"
+          docker network create --internal bench-internal
+          docker run -d --name proxy -e ALLOW=api.anthropic.com -v "${GITHUB_WORKSPACE}/scripts:/scripts:ro" "${NODE_IMAGE}" node /scripts/egress-proxy.mjs
+          docker network connect bench-internal proxy
+          docker run -d --name task --network bench-internal -v "${CLAUDE_BIN}:/usr/local/bin/claude:ro" \
+            -e HTTPS_PROXY=http://proxy:3128 -e HTTP_PROXY=http://proxy:3128 -e NO_PROXY=localhost,127.0.0.1 \
+            -e IS_SANDBOX=1 -e DISABLE_AUTOUPDATER=1 -e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+            --entrypoint sleep "${IMAGE}" infinity
+          docker exec task git config --system --add safe.directory /testbed
+          scripts/flatten-repo.sh > /dev/null
+          docker cp "${RUNNER_TEMP}/fix.patch" task:/tmp/fix.patch
+          docker exec -w /testbed task git apply --whitespace=nowarn /tmp/fix.patch
+          docker exec task rm /tmp/fix.patch
+          docker exec -w /testbed task git diff --stat
+
+      - name: Run the reviewer
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          TASK: ${{ steps.input.outputs.task }}
+        run: |
+          set +e -uo pipefail
+          node -e 'import("./scripts/issue.mjs").then(({ withIssue }) => { const t = require(process.argv[1]); process.stdout.write(withIssue("reviewer.md", t.problem_statement, t.task_id)); })' "./tasks/${TASK}.json" > "${RUNNER_TEMP}/first.md"
+          timeout "${REVIEW_MINUTES}m" docker exec -e CLAUDE_CODE_OAUTH_TOKEN -w /testbed task \
+            claude -p "$(cat "${RUNNER_TEMP}/first.md")" \
+              --model "${MODEL}" --effort "${EFFORT}" --max-turns "${REVIEW_TURNS}" --output-format json --dangerously-skip-permissions \
+            > "${RUNNER_TEMP}/review.json"
+          echo "reviewer exited $?"
+          docker rm -f task proxy > /dev/null
+          node -e '
+            let r; try { r = require(process.argv[1]); } catch { console.log("no result"); process.exit(0); }
+            const u = r.usage ?? {};
+            console.log(`turns ${r.num_turns}, input ${u.input_tokens}, output ${u.output_tokens}, cache read ${u.cache_read_input_tokens}, cache write ${u.cache_creation_input_tokens}${r.is_error ? `, stopped: ${r.subtype}` : ""}`);
+            const line = String(r.result ?? "").trim().split("\n").reverse().find((l) => /^VERDICT:/.test(l.trim()));
+            console.log(`${process.env.TASK} ${line ? line.trim() : "VERDICT: none"}`);
+          ' "${RUNNER_TEMP}/review.json"
