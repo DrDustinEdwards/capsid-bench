@@ -87,8 +87,8 @@ jobs:
           PATH="${RUNNER_TEMP}/venv/bin:${PATH}" python3 scripts/mutants.py "tasks/${TASK}.json" "${RUNNER_TEMP}/fix.patch" "${RUNNER_TEMP}/repro-name" "${RUNNER_TEMP}/mutants.json"
           node -e '
             const r = require(process.argv[1]);
-            // The reason's fixed words: its parenthesis can quote the test's own output,
-            // except the check's own failure, which names only an exception type.
+            // The fixed words of the reason: a parenthesis can quote the test output, except
+            // in a failure of the check itself, which names only an exception type.
             const why = (s) => (s.startsWith("the check itself") ? s : s.split(" (")[0]);
             console.log(`${process.env.TASK} repro ${r.repro.passed ? "passed" : "not passed"} (${why(r.repro.reason)}); killed ${r.killed} of ${r.valid} (${r.invalid} invalid)`);
             for (const s of r.survivors) console.log(`  survived: ${s}`);
