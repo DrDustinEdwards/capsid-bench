@@ -4,7 +4,7 @@ The harness for the paired comparison of Claude Code with and without Capsid: fr
 
 ## Rules
 
-- Tests: keep the minimal set (a few browser tests for flows that must never break, one integration test per real behaviour, unit tests only for tricky logic, shared code tested once where it lives), and remove any test that pins design, repeats coverage or has never caught a real mistake, unless it guards a harm that cannot be undone.
+- Tests: keep the minimal set (a few browser tests for flows that must never break, one integration test per real behavior, unit tests only for tricky logic, shared code tested once where it lives), and remove any test that pins design, repeats coverage or has never caught a real mistake, unless it guards a harm that cannot be undone.
 - No model run (`bench-run`, the walk's second reader) without Dustin's explicit yes. Never print a claim, a hidden test result or a secret in a log.
 - Never edit `frame/` (the walk refuses a frame whose hash changed), the `walk` or `sealed` branches, or a sealed run.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The simulation of the analysis (protocol section 6, "Simulation", decided 2026-10-22).
 // It runs the hashed analysis itself, scripts/analyze.mjs, on seeded synthetic exports and
-// reports how often the joint rule favours the treatment. This file and its output are
+// reports how often the joint rule favors the treatment. This file and its output are
 // hashed into the registration.
 //
 //   node scripts/simulate.mjs [--reps 1000] [--resamples 2000] [--seed capsid-bench-sim]
@@ -115,15 +115,15 @@ export function simulate({ reps, resamples, seed, sizes = [120, 160] }) {
   for (const n of sizes) {
     for (const [name, scenario] of Object.entries(SCENARIOS)) {
       const random = rng(`${seed}:${n}:${name}`);
-      let favoured = 0;
+      let favored = 0;
       let confirmatory = 0;
       for (let r = 0; r < reps; r++) {
         const { data, accepted, audit } = synthetic(n, scenario, random);
         const result = analyze(data, { accepted, audit, seed: `${seed}:${n}:${name}:${r}`, resamples });
-        if (/treatment is favoured/.test(result.sentence)) favoured++;
+        if (/treatment is favored/.test(result.sentence)) favored++;
         if (!/not confirmatory|Below the floor/i.test(result.sentence)) confirmatory++;
       }
-      out.results.push({ n, scenario: name, favoured: favoured / reps, confirmatory: confirmatory / reps });
+      out.results.push({ n, scenario: name, favored: favored / reps, confirmatory: confirmatory / reps });
     }
   }
   return out;

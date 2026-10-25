@@ -230,9 +230,9 @@ export const MARGIN = 0.1;
 // the result is not confirmatory (section 4, "Second reader").
 export const NON_MARKING_MAX = 0.1;
 
-// The sentence the result allows (section 6, "Sentence"). The treatment is favoured only
+// The sentence the result allows (section 6, "Sentence"). The treatment is favored only
 // when the (b) interval lies entirely below zero and the resolution interval lies entirely
-// above minus the margin. Any other outcome favours neither arm.
+// above minus the margin. Any other outcome favors neither arm.
 export function allowedSentence(primary, b, resolution, nonMarking) {
   if (primary.tasks < FLOOR_TASKS || primary.repositories < FLOOR_REPOSITORIES) {
     return `Below the floor (${primary.tasks} primary-set tasks from ${primary.repositories} repositories; ${FLOOR_TASKS} from ${FLOOR_REPOSITORIES} needed): estimates and intervals only, not confirmatory.`;
@@ -241,8 +241,8 @@ export function allowedSentence(primary, b, resolution, nonMarking) {
     const why = nonMarking ? `${nonMarking.none} of ${nonMarking.audited} second-reader responses did not mark in or out` : "the second reader's log was not given";
     return `Not confirmatory: ${why} (at most ${NON_MARKING_MAX * 100}% allowed). Estimates and intervals only.`;
   }
-  if (b.high < 0 && resolution.low > -MARGIN) return "The treatment is favoured: the (b) interval lies entirely below zero and the resolution interval entirely above -10 points.";
-  return "Neither arm is favoured: estimates and intervals only.";
+  if (b.high < 0 && resolution.low > -MARGIN) return "The treatment is favored: the (b) interval lies entirely below zero and the resolution interval entirely above -10 points.";
+  return "Neither arm is favored: estimates and intervals only.";
 }
 
 // The share of the second reader's responses that marked neither in nor out, over every

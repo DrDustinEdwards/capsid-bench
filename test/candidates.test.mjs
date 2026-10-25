@@ -32,9 +32,9 @@ test("a repository is eligible only if Python, JS or TS, permissive and not the 
   assert.equal(repoRefusal(repo({ owner: { login: "DrDustinEdwards" } })), "the author's own");
   assert.equal(repoRefusal(repo({ primaryLanguage: { name: "Rust" } })), "not Python, JavaScript or TypeScript");
   assert.equal(repoRefusal(repo({ primaryLanguage: null })), "not Python, JavaScript or TypeScript");
-  assert.equal(repoRefusal(repo({ licenseInfo: { spdxId: "GPL-3.0" } })), "licence not permissive");
-  assert.equal(repoRefusal(repo({ licenseInfo: { spdxId: "NOASSERTION" } })), "licence not permissive");
-  assert.equal(repoRefusal(repo({ licenseInfo: null })), "licence not permissive");
+  assert.equal(repoRefusal(repo({ licenseInfo: { spdxId: "GPL-3.0" } })), "licence not permissive"); // codespell:ignore
+  assert.equal(repoRefusal(repo({ licenseInfo: { spdxId: "NOASSERTION" } })), "licence not permissive"); // codespell:ignore
+  assert.equal(repoRefusal(repo({ licenseInfo: null })), "licence not permissive"); // codespell:ignore
 });
 
 test("test paths", () => {

@@ -1,7 +1,7 @@
 """The frame's repository list (protocol section 4, "Frame"): every repository in a
 SWE-rebench-format dataset at one recorded commit, with the install recipe a task from it
 would use. Reads local parquet files fetched at that commit: registers nothing, starts no
-run, calls no model. Eligibility (language, licence, owner) is checked against GitHub by
+run, calls no model. Eligibility (language, license, owner) is checked against GitHub by
 scripts/candidates.mjs, which reads this file.
 
   python3 scripts/repos.py <dir-of-parquet> <manifest.json> <out.json>

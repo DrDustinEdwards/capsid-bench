@@ -6,7 +6,7 @@
 //   GITHUB_TOKEN=... node scripts/candidates.mjs --repos repos.json --freeze 2026-10-20 --out candidates.json
 //
 // A repository is eligible when GitHub gives its primary language as Python, JavaScript
-// or TypeScript, its licence is permissive, and its owner is not the author's. A
+// or TypeScript, its license is permissive, and its owner is not the author's. A
 // candidate is a merged pull request in an eligible repository that:
 //   1. was merged after 2026-07-01 and on or before the freeze date (UTC);
 //   2. closes exactly one issue in the same repository (GitHub's closing references: a
@@ -38,7 +38,7 @@ export function repoRefusal(info) {
   if (!info) return "not found on GitHub";
   if (AUTHOR_OWNERS.has(info.owner.login.toLowerCase())) return "the author's own";
   if (!LANGUAGES.has(info.primaryLanguage?.name)) return "not Python, JavaScript or TypeScript";
-  if (!PERMISSIVE.has(info.licenseInfo?.spdxId)) return "licence not permissive";
+  if (!PERMISSIVE.has(info.licenseInfo?.spdxId)) return "licence not permissive"; // codespell:ignore: frame/candidates.json records this reason
   return null;
 }
 
