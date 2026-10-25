@@ -259,7 +259,7 @@ test("the analysis stays sealed until N or every drawn task has finished, then g
   const floor = { tasks: 120, repositories: 80 };
   const ok = { audited: 160, none: 16, share: 0.1 };
   const lower = { low: -0.2, high: -0.01 };
-  assert.match(allowedSentence(floor, lower, { low: -0.09, high: 0.05 }, ok), /treatment is favoured/);
+  assert.match(allowedSentence(floor, lower, { low: -0.09, high: 0.05 }, ok), /treatment is favored/);
   // Resolution falling 10 points or more withholds the win.
   assert.match(allowedSentence(floor, lower, { low: -0.1, high: 0.05 }, ok), /Neither arm/);
   // There is no win for the baseline on (b) alone.

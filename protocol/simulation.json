@@ -9,61 +9,61 @@
     {
       "n": 120,
       "scenario": "null",
-      "favoured": 0,
+      "favored": 0,
       "confirmatory": 0.027
     },
     {
       "n": 120,
       "scenario": "b_minus_10",
-      "favoured": 0.014,
+      "favored": 0.014,
       "confirmatory": 0.022
     },
     {
       "n": 120,
       "scenario": "b_minus_10_resolution_minus_10",
-      "favoured": 0.002,
+      "favored": 0.002,
       "confirmatory": 0.032
     },
     {
       "n": 120,
       "scenario": "b_minus_5",
-      "favoured": 0.011,
+      "favored": 0.011,
       "confirmatory": 0.027
     },
     {
       "n": 120,
       "scenario": "b_minus_10_low_resolution",
-      "favoured": 0.019,
+      "favored": 0.019,
       "confirmatory": 0.026
     },
     {
       "n": 160,
       "scenario": "null",
-      "favoured": 0.018,
+      "favored": 0.018,
       "confirmatory": 1
     },
     {
       "n": 160,
       "scenario": "b_minus_10",
-      "favoured": 0.799,
+      "favored": 0.799,
       "confirmatory": 1
     },
     {
       "n": 160,
       "scenario": "b_minus_10_resolution_minus_10",
-      "favoured": 0.028,
+      "favored": 0.028,
       "confirmatory": 1
     },
     {
       "n": 160,
       "scenario": "b_minus_5",
-      "favoured": 0.393,
+      "favored": 0.393,
       "confirmatory": 1
     },
     {
       "n": 160,
       "scenario": "b_minus_10_low_resolution",
-      "favoured": 0.841,
+      "favored": 0.841,
       "confirmatory": 1
     }
   ]
