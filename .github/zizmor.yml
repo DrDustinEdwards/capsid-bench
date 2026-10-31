@@ -1,0 +1,6 @@
+rules:
+  dangerous-triggers:
+    ignore:
+      # issue_comment is guarded: the record job runs only for the repository owner's comment on an open issue
+      # (bench-audit.yml, record's `if:`), and the comment body reaches the script only through env.
+      - bench-audit.yml:10

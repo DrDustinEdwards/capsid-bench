@@ -17,6 +17,9 @@ on:
         description: The registration's SHA-256 (first start only)
         default: ""
   workflow_call:
+    secrets:
+      SECOND_READER_KEY:
+        required: false
 
 permissions:
   actions: write
@@ -44,7 +47,7 @@ jobs:
           ref: main
           persist-credentials: false
 
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0  # zizmor: ignore[artipacked] walk-state pushes the walk log with git
         with:
           ref: main
           path: walk-state
@@ -97,7 +100,7 @@ jobs:
           while [ "${SECONDS}" -lt "${budget}" ]; do
             out="$(node scripts/walk.mjs step --frame frame/candidates.json --repos frame/repos.json --dir walk-state | tail -1)"
             echo "${out}" | tee -a "$GITHUB_STEP_SUMMARY"
-            (cd walk-state && git add -A && git diff --cached --quiet || { git commit -qm "walk: $(echo "${out}" | jq -r '[.action, .position // empty, .task_id // empty] | join(" ")')" && git push -q origin walk; })
+            (cd walk-state && git add -A && { git diff --cached --quiet || { git commit -qm "walk: $(echo "${out}" | jq -r '[.action, .position // empty, .task_id // empty] | join(" ")')" && git push -q origin walk; }; })
             docker system prune -af --volumes > /dev/null
             last="$(echo "${out}" | jq -r .action)"
             case "${last}" in

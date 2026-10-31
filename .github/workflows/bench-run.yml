@@ -116,6 +116,7 @@ jobs:
           BENCH_KEY: ${{ secrets.BENCH_KEY }}
         run: |
           set -euo pipefail
+          # shellcheck disable=SC2016 # single quotes on purpose: the script is JavaScript for node
           node -e 'process.stdout.write(JSON.stringify({ task_id: process.env.TASK_ID, arm: process.env.ARM, gh_run: `${process.env.GITHUB_RUN_ID}.${process.env.GITHUB_RUN_ATTEMPT}` }))' > "${RUNNER_TEMP}/start.json"
           node scripts/sign-post.mjs /bench/start "${RUNNER_TEMP}/start.json" > "${RUNNER_TEMP}/started.json"
           echo "run_id=$(node -p 'require(process.argv[1]).run_id' "${RUNNER_TEMP}/started.json")" >> "$GITHUB_OUTPUT"
@@ -214,6 +215,7 @@ jobs:
           # The harness posts the job with the bench driver key, which never enters the
           # container. The agent holds only the run key, read from its env by Claude Code.
           echo "job_id=$(node scripts/post-job.mjs "${RUN_ID}" "${TASK_ID}" "${RUNNER_TEMP}/stage/agent/problem.md")" >> "$GITHUB_OUTPUT"
+          # shellcheck disable=SC2016 # single quotes on purpose: Claude Code expands ${CAPSID_RUN_KEY} itself, so the key is never written to the file
           printf '%s' '{"mcpServers":{"capsid":{"type":"http","url":"https://mcp.dustinedwards.info/ops/mcp","headers":{"Authorization":"Bearer ${CAPSID_RUN_KEY}"}}}}' > "${RUNNER_TEMP}/mcp.json"
           docker cp "${RUNNER_TEMP}/mcp.json" task:/tmp/mcp.json
 
@@ -248,7 +250,7 @@ jobs:
           # The planted arms claim through the same tool and parser as the model arms,
           # after a delivery mark like theirs.
           scripts/copy-claims.sh "${RUNNER_TEMP}/claims-delivered.jsonl"
-          docker exec task /usr/local/bin/bench-claim done
+          docker exec task /usr/local/bin/bench-claim "done"
 
       - name: Run phase one
         id: turn1
@@ -270,6 +272,7 @@ jobs:
           code=$?
           [ "${code}" = 0 ] || echo "phase one exited ${code}"
           # Why Claude Code stopped, for an error stop only: its error text, never the agent's output.
+          # shellcheck disable=SC2016 # single quotes on purpose: the script is JavaScript for node
           node -e 'try { const r = require(process.argv[1]); if (r.is_error) console.log(`phase one stopped: ${r.subtype}: ${String(r.result ?? "").slice(0, 300)}`); } catch {}' "${RUNNER_TEMP}/turn1.json"
           scripts/stop-agent.sh "${code}" "${RUNNER_TEMP}/timed-out"
           # An error stop (a usage limit or a transport error, not told apart) ends the run
@@ -347,6 +350,7 @@ jobs:
           code=$?
           [ "${code}" = 0 ] || echo "phase two exited ${code}"
           # Why Claude Code stopped, for an error stop only: its error text, never the agent's output.
+          # shellcheck disable=SC2016 # single quotes on purpose: the script is JavaScript for node
           node -e 'try { const r = require(process.argv[1]); if (r.is_error) console.log(`phase two stopped: ${r.subtype}: ${String(r.result ?? "").slice(0, 300)}`); } catch {}' "${RUNNER_TEMP}/turn2.json"
           scripts/stop-agent.sh "${code}" "${RUNNER_TEMP}/timed-out"
           if [ "$(node -p 'try { require(process.argv[1]).subtype ?? "" } catch { "" }' "${RUNNER_TEMP}/turn2.json")" = error_during_execution ]; then

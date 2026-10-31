@@ -55,7 +55,7 @@ jobs:
             curl -fsSL --retry 6 --retry-all-errors --retry-delay 10 -o "${D}/${path}" "https://huggingface.co/datasets/${DATASET}/resolve/${COMMIT}/${path}"
             sleep 1
           done < "${RUNNER_TEMP}/files.txt"
-          (cd "${D}" && sha256sum $(cat "${RUNNER_TEMP}/files.txt")) |
+          (cd "${D}" && xargs -d '\n' sha256sum < "${RUNNER_TEMP}/files.txt") |
             jq -R -s --arg dataset "${DATASET}" --arg commit "${COMMIT}" \
               '{dataset: $dataset, commit: $commit, files: [split("\n")[] | select(length > 0) | capture("^(?<sha256>[0-9a-f]+)  (?<path>.+)$")]}' > "${RUNNER_TEMP}/manifest.json"
           python3 scripts/repos.py "${D}" "${RUNNER_TEMP}/manifest.json" "${RUNNER_TEMP}/repos.json" | tee -a "$GITHUB_STEP_SUMMARY"

@@ -97,6 +97,7 @@ jobs:
         if: github.event_name == 'push'
         run: |
           set -euo pipefail
+          # shellcheck disable=SC2016 # single quotes on purpose: the script is JavaScript for node
           SEAL_MODULES="${RUNNER_TEMP}/seal/node_modules" node --input-type=module -e '
             import { createRequire } from "node:module";
             import { ACTIONS_ISSUER, WORKFLOW_SHA_OID } from "./scripts/unseal.mjs";
@@ -210,11 +211,11 @@ jobs:
           docker cp scripts/bench-claim.sh task:/usr/local/bin/bench-claim
           docker exec task chmod 755 /usr/local/bin/bench-claim
           if docker exec task bench-claim maybe; then echo "the tool took a word it should refuse" >&2; exit 1; fi
-          docker exec task bench-claim done
+          docker exec task bench-claim "done"
           scripts/copy-claims.sh "${RUNNER_TEMP}/delivered.jsonl"
           scripts/copy-claims.sh "${RUNNER_TEMP}/final.jsonl"
           [ "$(node -p 'JSON.parse(process.argv[1]).claimed_done' "$(node scripts/read-claims.mjs "${RUNNER_TEMP}/final.jsonl" "${RUNNER_TEMP}/delivered.jsonl")")" = false ] || { echo "a claim from before delivery counted" >&2; exit 1; }
-          docker exec task bench-claim done
+          docker exec task bench-claim "done"
           scripts/copy-claims.sh "${RUNNER_TEMP}/final.jsonl"
           [ "$(node -p 'JSON.parse(process.argv[1]).claimed_done' "$(node scripts/read-claims.mjs "${RUNNER_TEMP}/final.jsonl" "${RUNNER_TEMP}/delivered.jsonl")")" = true ] || { echo "a claim after delivery did not count" >&2; exit 1; }
           docker rm -f task

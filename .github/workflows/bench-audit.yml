@@ -32,7 +32,7 @@ jobs:
           ref: main
           persist-credentials: false
 
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0  # zizmor: ignore[artipacked] walk-state pushes the walk log with git
         with:
           ref: main
           path: walk-state
@@ -67,6 +67,7 @@ jobs:
             git add log.jsonl && git commit -qm "walk: audit recorded from #${ISSUE}" && git push -q origin walk
             gh issue close "${ISSUE}" --repo "${REPO}" --comment "Recorded: $(echo "${out}" | jq -r '[.decision, .reason // empty] | join(" ")')."
           elif [ "$(echo "${out}" | jq -r '.reply // false')" = "true" ]; then
+            # shellcheck disable=SC2016 # single quotes on purpose: the backticks are Markdown in the reply
             gh issue comment "${ISSUE}" --repo "${REPO}" --body 'Not recorded. Write `in`, or `out <code>` followed by the quoted reason, with a code from the list above.'
           fi
 
@@ -78,4 +79,5 @@ jobs:
       contents: write
       issues: write
     uses: ./.github/workflows/bench-walk.yml
-    secrets: inherit
+    secrets:
+      SECOND_READER_KEY: ${{ secrets.SECOND_READER_KEY }}
