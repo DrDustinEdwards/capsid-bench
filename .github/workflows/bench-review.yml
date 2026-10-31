@@ -124,6 +124,7 @@ jobs:
             > "${RUNNER_TEMP}/review.json"
           echo "reviewer exited $?"
           docker rm -f task proxy > /dev/null
+          # shellcheck disable=SC2016 # single quotes on purpose: the script is JavaScript for node
           node -e '
             let r; try { r = require(process.argv[1]); } catch { console.log("no result"); process.exit(0); }
             const u = r.usage ?? {};

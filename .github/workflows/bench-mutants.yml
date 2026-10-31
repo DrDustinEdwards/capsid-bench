@@ -85,6 +85,7 @@ jobs:
           set -euo pipefail
           docker pull --quiet "$(node -p 'require(process.argv[1]).image' "./tasks/${TASK}.json")" > /dev/null
           PATH="${RUNNER_TEMP}/venv/bin:${PATH}" python3 scripts/mutants.py "tasks/${TASK}.json" "${RUNNER_TEMP}/fix.patch" "${RUNNER_TEMP}/repro-name" "${RUNNER_TEMP}/mutants.json"
+          # shellcheck disable=SC2016 # single quotes on purpose: the script is JavaScript for node
           node -e '
             const r = require(process.argv[1]);
             // The fixed words of the reason: a parenthesis can quote the test output, except
