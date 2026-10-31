@@ -103,7 +103,7 @@ jobs:
         run: |
           set -euo pipefail
           # shellcheck disable=SC2016 # single quotes on purpose: the script is JavaScript for node
-          SEAL_MODULES="${RUNNER_TEMP}/seal/node_modules" node --input-type=module -e '
+          SEAL_MODULES="${PWD}/tools/node_modules" node --input-type=module -e '
             import { createRequire } from "node:module";
             import { ACTIONS_ISSUER, WORKFLOW_SHA_OID } from "./scripts/unseal.mjs";
             const sigstore = createRequire(process.env.SEAL_MODULES + "/x.cjs")("sigstore");
