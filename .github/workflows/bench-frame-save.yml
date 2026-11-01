@@ -11,12 +11,13 @@ on:
         description: The bench-candidates run
         required: true
 
-permissions:
-  contents: write
-  actions: read
+permissions: {}
 
 jobs:
   save:
+    permissions:
+      contents: write
+      actions: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
