@@ -21,10 +21,7 @@ on:
       SECOND_READER_KEY:
         required: false
 
-permissions:
-  actions: write
-  contents: write
-  issues: write
+permissions: {}
 
 env:
   # The second reader (protocol, "Second reader"): a model from another vendor, frozen in
@@ -36,6 +33,10 @@ env:
 
 jobs:
   walk:
+    permissions:
+      actions: write
+      contents: write
+      issues: write
     runs-on: ubuntu-latest
     timeout-minutes: 350
     concurrency:

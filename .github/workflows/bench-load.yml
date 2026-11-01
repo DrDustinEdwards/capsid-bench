@@ -27,11 +27,12 @@ on:
         type: choice
         options: [pilot, full, excluded]
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   load:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
