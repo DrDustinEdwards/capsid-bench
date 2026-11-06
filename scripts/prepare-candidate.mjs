@@ -33,7 +33,7 @@ export function github(token, fetchImpl = fetch) {
   const headers = { Authorization: `bearer ${token}`, "User-Agent": "capsid-bench-prepare", "X-GitHub-Api-Version": "2022-11-28" };
   const call = async (path, accept = "application/vnd.github+json", init = {}) => {
     for (let attempt = 0; ; attempt++) {
-      const response = await fetchImpl(`${API}${path}`, { ...init, headers: { ...headers, Accept: accept, ...(init.headers ?? {}) } });
+      const response = await fetchImpl(`${API}${path}`, { ...init, headers: { ...headers, Accept: accept, ...init.headers } });
       if ((response.status === 403 || response.status === 429 || response.status >= 500) && attempt < 6) {
         await new Promise((r) => setTimeout(r, 5000 * 2 ** attempt));
         continue;

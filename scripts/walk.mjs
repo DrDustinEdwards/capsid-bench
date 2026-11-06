@@ -146,7 +146,7 @@ export function secondPrompt(template, instance) {
 // The registered second reader, from the environment.
 export function secondReaderConfig(env, promptText) {
   const config = { url: env.SECOND_READER_URL ?? "", model: env.SECOND_READER_MODEL ?? "", prompt_sha256: createHash("sha256").update(promptText).digest("hex") };
-  if (!/^https:\/\//.test(config.url) || !config.model) throw new Error("SECOND_READER_URL and SECOND_READER_MODEL must name the registered second reader");
+  if (!config.url.startsWith("https://") || !config.model) throw new Error("SECOND_READER_URL and SECOND_READER_MODEL must name the registered second reader");
   if (/anthropic|claude/i.test(`${config.url} ${config.model}`)) throw new Error("the second reader's vendor is not Anthropic");
   return config;
 }
