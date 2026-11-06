@@ -31,7 +31,10 @@ export const ACTIONS_ISSUER = "https://token.actions.githubusercontent.com";
 // Fulcio's GitHub Workflow SHA extension: the commit the signing workflow ran at.
 export const WORKFLOW_SHA_OID = "1.3.6.1.4.1.57264.1.3";
 
-const reportOf = (run) => (run.report && typeof run.report === "object" ? run.report : JSON.parse(run.report ?? "null") ?? {});
+const reportOf = (run) =>
+  run.report && typeof run.report === "object"
+    ? run.report
+    : (JSON.parse(run.report ?? "null") ?? {});
 
 // The round an armored tlock ciphertext is locked to, from its age header's tlock stanza.
 export function lockedRound(armored) {
@@ -42,24 +45,33 @@ export function lockedRound(armored) {
   const header = Buffer.from(body, "base64").toString("latin1");
   const stanza = header.match(/^-> tlock (\d+) ([0-9a-f]{64})$/m);
   if (!stanza) throw new Error("no tlock stanza in the ciphertext's header");
-  if (stanza[2] !== QUICKNET.chain_hash) throw new Error(`locked to chain ${stanza[2]}, not quicknet`);
+  if (stanza[2] !== QUICKNET.chain_hash)
+    throw new Error(`locked to chain ${stanza[2]}, not quicknet`);
   return Number(stanza[1]);
 }
 
 // The checks that need no network, on one run's stored files.
 export function checkSealed({ runId, recorded, ciphertext, bundle, round }) {
-  if (sha256(ciphertext) !== recorded.sha256) throw new Error(`${runId}: the ciphertext's SHA-256 is not the one Capsid recorded`);
+  if (sha256(ciphertext) !== recorded.sha256)
+    throw new Error(`${runId}: the ciphertext's SHA-256 is not the one Capsid recorded`);
   const entry = bundle.verificationMaterial?.tlogEntries?.[0];
   if (!entry) throw new Error(`${runId}: the Sigstore bundle has no Rekor entry`);
-  if (Number(entry.logIndex) !== recorded.log_index) throw new Error(`${runId}: Rekor index ${entry.logIndex}, but Capsid recorded ${recorded.log_index}`);
-  if (!(Number(entry.integratedTime) < roundTime(round))) throw new Error(`${runId}: integrated into Rekor at ${entry.integratedTime}, not before round ${round} at ${roundTime(round)}`);
+  if (Number(entry.logIndex) !== recorded.log_index)
+    throw new Error(
+      `${runId}: Rekor index ${entry.logIndex}, but Capsid recorded ${recorded.log_index}`,
+    );
+  if (!(Number(entry.integratedTime) < roundTime(round)))
+    throw new Error(
+      `${runId}: integrated into Rekor at ${entry.integratedTime}, not before round ${round} at ${roundTime(round)}`,
+    );
   const locked = lockedRound(ciphertext.toString("utf8"));
   if (locked !== round) throw new Error(`${runId}: locked to round ${locked}, not R_seal ${round}`);
 }
 
 // The opened bundle's outcome fields, as Capsid would have stored them unsealed.
 export function outcomeOf(runId, opened) {
-  if (opened.run_id !== runId || opened.report?.run_id !== runId) throw new Error(`${runId}: the ciphertext opens to run ${opened.run_id}'s bundle`);
+  if (opened.run_id !== runId || opened.report?.run_id !== runId)
+    throw new Error(`${runId}: the ciphertext opens to run ${opened.run_id}'s bundle`);
   const hidden = opened.report.hidden;
   if (!hidden) throw new Error(`${runId}: the sealed report has no hidden test counts`);
   const u = opened.report.usage ?? {};
@@ -76,8 +88,13 @@ export function outcomeOf(runId, opened) {
 export async function unseal(data, { sealedDir, t, commit, tlock, sigstore }) {
   const round = roundAt(t);
   if (Date.now() / 1000 < roundTime(round)) throw new Error(`round ${round} is not published yet`);
-  if (!/^[0-9a-f]{40}$/.test(commit ?? "")) throw new Error("--commit must be the registered 40-character commit");
-  const verifier = await sigstore.createVerifier({ certificateIdentityURI: WORKFLOW_IDENTITY, certificateIssuer: ACTIONS_ISSUER, certificateOIDs: { [WORKFLOW_SHA_OID]: commit } });
+  if (!/^[0-9a-f]{40}$/.test(commit ?? ""))
+    throw new Error("--commit must be the registered 40-character commit");
+  const verifier = await sigstore.createVerifier({
+    certificateIdentityURI: WORKFLOW_IDENTITY,
+    certificateIssuer: ACTIONS_ISSUER,
+    certificateOIDs: { [WORKFLOW_SHA_OID]: commit },
+  });
   const runs = [];
   const missing = [];
   let opened = 0;
@@ -90,7 +107,9 @@ export async function unseal(data, { sealedDir, t, commit, tlock, sigstore }) {
     let ciphertext;
     try {
       ciphertext = readFileSync(join(sealedDir, "sealed", `${run.id}.tlock`));
-      const bundle = JSON.parse(readFileSync(join(sealedDir, "sealed", `${run.id}.sigstore.json`), "utf8"));
+      const bundle = JSON.parse(
+        readFileSync(join(sealedDir, "sealed", `${run.id}.sigstore.json`), "utf8"),
+      );
       checkSealed({ runId: run.id, recorded, ciphertext, bundle, round });
       verifier.verify(bundle, ciphertext);
     } catch (err) {
@@ -114,10 +133,24 @@ export async function unseal(data, { sealedDir, t, commit, tlock, sigstore }) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const { values, positionals } = parseArgs({ allowPositionals: true, options: { sealed: { type: "string" }, t: { type: "string" }, commit: { type: "string" }, out: { type: "string" } } });
+  const { values, positionals } = parseArgs({
+    allowPositionals: true,
+    options: {
+      sealed: { type: "string" },
+      t: { type: "string" },
+      commit: { type: "string" },
+      out: { type: "string" },
+    },
+  });
   const require = createRequire(join(process.env.SEAL_MODULES ?? ".", "unseal.cjs"));
   const data = JSON.parse(readFileSync(positionals[0], "utf8"));
-  unseal(data, { sealedDir: values.sealed, t: values.t, commit: values.commit, tlock: require("tlock-js"), sigstore: require("sigstore") })
+  unseal(data, {
+    sealedDir: values.sealed,
+    t: values.t,
+    commit: values.commit,
+    tlock: require("tlock-js"),
+    sigstore: require("sigstore"),
+  })
     .then(({ data: out, opened, missing }) => {
       writeFileSync(values.out, JSON.stringify(out));
       console.log(`opened ${opened} sealed runs; ${missing.length} missing`);

@@ -21,7 +21,9 @@ function entries(text) {
     .map((line) => {
       try {
         const value = JSON.parse(line);
-        return value && (value.claim === "done" || value.claim === "not-done") ? { claim: value.claim, at: String(value.at ?? "") } : null;
+        return value && (value.claim === "done" || value.claim === "not-done")
+          ? { claim: value.claim, at: String(value.at ?? "") }
+          : null;
       } catch {
         return null;
       }
@@ -29,11 +31,18 @@ function entries(text) {
 }
 
 export function readClaims(finalText, deliveredText) {
-  if (deliveredText === null || deliveredText === undefined) return { claimed_done: false, delivered: false, tampered: false, after_delivery: [] };
-  if (!finalText.startsWith(deliveredText)) return { claimed_done: false, delivered: true, tampered: true, after_delivery: [] };
+  if (deliveredText === null || deliveredText === undefined)
+    return { claimed_done: false, delivered: false, tampered: false, after_delivery: [] };
+  if (!finalText.startsWith(deliveredText))
+    return { claimed_done: false, delivered: true, tampered: true, after_delivery: [] };
   const after = entries(finalText.slice(deliveredText.length)).filter(Boolean);
   const last = after.at(-1);
-  return { claimed_done: last?.claim === "done", delivered: true, tampered: false, after_delivery: after };
+  return {
+    claimed_done: last?.claim === "done",
+    delivered: true,
+    tampered: false,
+    after_delivery: after,
+  };
 }
 
 function readOrNull(file) {
@@ -47,5 +56,7 @@ function readOrNull(file) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [finalFile, deliveredFile] = process.argv.slice(2);
-  process.stdout.write(JSON.stringify(readClaims(readOrNull(finalFile) ?? "", readOrNull(deliveredFile))));
+  process.stdout.write(
+    JSON.stringify(readClaims(readOrNull(finalFile) ?? "", readOrNull(deliveredFile))),
+  );
 }
