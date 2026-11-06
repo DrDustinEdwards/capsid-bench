@@ -1,0 +1,9 @@
+{
+  "apps": {
+    ".": "package"
+  },
+  "spelling": {
+    "ignore": ["licence"],
+    "skip": ["frame/**", "tasks/**", "prompts/**"]
+  }
+}
