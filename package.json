@@ -1,12 +1,9 @@
 {
   "name": "capsid-bench",
   "private": true,
-  "type": "module",
   "description": "The harness for the paired comparison of Claude Code with and without Capsid. Root package.json holds the lint tooling only; the seal's own dependencies are in tools/.",
   "license": "MIT",
-  "engines": {
-    "node": ">=26.11.1"
-  },
+  "type": "module",
   "scripts": {
     "format": "oxfmt",
     "format:check": "oxfmt --check",
@@ -17,5 +14,8 @@
     "oxfmt": "0.77.0",
     "oxlint": "1.92.0",
     "oxlint-tsgolint": "7.0.2006"
+  },
+  "engines": {
+    "node": ">=26.11.1"
   }
 }

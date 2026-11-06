@@ -16,7 +16,14 @@ export function signedRequest(key, body, now = new Date()) {
   const text = JSON.stringify({ ...body, jti: randomUUID() });
   const timestamp = now.toISOString().replace(/\.\d+Z$/, "Z");
   const signature = createHmac("sha256", key).update(`${timestamp}.${text}`).digest("hex");
-  return { text, headers: { "Content-Type": "application/json", "X-Bench-Timestamp": timestamp, "X-Bench-Signature": signature } };
+  return {
+    text,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Bench-Timestamp": timestamp,
+      "X-Bench-Signature": signature,
+    },
+  };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -35,7 +35,8 @@ function gamma(shape, random) {
     } while (v <= 0);
     v = v * v * v;
     const u = random();
-    if (u < 1 - 0.0331 * x ** 4 || Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v;
+    if (u < 1 - 0.0331 * x ** 4 || Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v)))
+      return d * v;
   }
 }
 function beta(mean, random) {
@@ -61,7 +62,13 @@ export function synthetic(n, scenario, random) {
     }
     left--;
     const task_id = `sample__sim-${i}`;
-    tasks.push({ task_id, repo: `sample/repo-${repo}`, split: "full", fail_to_pass_count: 1, pass_to_pass_count: 1 });
+    tasks.push({
+      task_id,
+      repo: `sample/repo-${repo}`,
+      split: "full",
+      fail_to_pass_count: 1,
+      pass_to_pass_count: 1,
+    });
     draw.push({ position: i, task_id });
     const lose = random() < LOSS ? Math.floor(random() * 6) : -1;
     const rates = {};
@@ -83,7 +90,14 @@ export function synthetic(n, scenario, random) {
           // Two unjudged attempts: the slot has no scored run.
           for (let t = 0; t < 2; t++) {
             const when = at();
-            runs.push({ task_id, arm, status: "unjudged", started_at: when, finished_at: when, report: "{}" });
+            runs.push({
+              task_id,
+              arm,
+              status: "unjudged",
+              started_at: when,
+              finished_at: when,
+              report: "{}",
+            });
           }
           continue;
         }
@@ -91,13 +105,28 @@ export function synthetic(n, scenario, random) {
         // (b) is a share of all runs; it can only fall on an unresolved run.
         const b = !resolved && random() < Math.min(1, pb / Math.max(1e-9, 1 - pr));
         const when = at();
-        runs.push({ task_id, arm, status: "scored", started_at: when, finished_at: when, claimed_done: resolved || b ? 1 : 0, fail_to_pass_passed: resolved ? 1 : 0, pass_to_pass_passed: 1, report: "{}" });
+        runs.push({
+          task_id,
+          arm,
+          status: "scored",
+          started_at: when,
+          finished_at: when,
+          claimed_done: resolved || b ? 1 : 0,
+          fail_to_pass_passed: resolved ? 1 : 0,
+          pass_to_pass_passed: 1,
+          report: "{}",
+        });
         slot++;
       }
     }
   }
   const accepted = tasks.map(({ task_id, repo }) => ({ task_id, repo }));
-  const audit = accepted.map(({ task_id }) => ({ event: "audit", reader: "second", task_id, decision: "in" }));
+  const audit = accepted.map(({ task_id }) => ({
+    event: "audit",
+    reader: "second",
+    task_id,
+    decision: "in",
+  }));
   return { data: { tasks, draw, runs }, accepted, audit };
 }
 
@@ -111,7 +140,15 @@ export const SCENARIOS = {
 };
 
 export function simulate({ reps, resamples, seed, sizes = [120, 160] }) {
-  const out = { reps, resamples, seed, icc: ICC, two_task_share: TWO_TASK_SHARE, loss: LOSS, results: [] };
+  const out = {
+    reps,
+    resamples,
+    seed,
+    icc: ICC,
+    two_task_share: TWO_TASK_SHARE,
+    loss: LOSS,
+    results: [],
+  };
   for (const n of sizes) {
     for (const [name, scenario] of Object.entries(SCENARIOS)) {
       const random = rng(`${seed}:${n}:${name}`);
@@ -119,11 +156,21 @@ export function simulate({ reps, resamples, seed, sizes = [120, 160] }) {
       let confirmatory = 0;
       for (let r = 0; r < reps; r++) {
         const { data, accepted, audit } = synthetic(n, scenario, random);
-        const result = analyze(data, { accepted, audit, seed: `${seed}:${n}:${name}:${r}`, resamples });
+        const result = analyze(data, {
+          accepted,
+          audit,
+          seed: `${seed}:${n}:${name}:${r}`,
+          resamples,
+        });
         if (/treatment is favored/.test(result.sentence)) favored++;
         if (!/not confirmatory|Below the floor/i.test(result.sentence)) confirmatory++;
       }
-      out.results.push({ n, scenario: name, favored: favored / reps, confirmatory: confirmatory / reps });
+      out.results.push({
+        n,
+        scenario: name,
+        favored: favored / reps,
+        confirmatory: confirmatory / reps,
+      });
     }
   }
   return out;
@@ -135,5 +182,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const i = argv.indexOf(`--${name}`);
     return i >= 0 ? argv[i + 1] : d;
   };
-  console.log(JSON.stringify(simulate({ reps: Number(flag("reps", 1000)), resamples: Number(flag("resamples", 2000)), seed: flag("seed", "capsid-bench-sim") }), null, 2));
+  console.log(
+    JSON.stringify(
+      simulate({
+        reps: Number(flag("reps", 1000)),
+        resamples: Number(flag("resamples", 2000)),
+        seed: flag("seed", "capsid-bench-sim"),
+      }),
+      null,
+      2,
+    ),
+  );
 }
