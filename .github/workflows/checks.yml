@@ -1,7 +1,7 @@
 name: checks
 
 # Every pull request check in one job (devkit's pr.yml): the footer strip, the trailer check, the shared-code check,
-# OSV-Scanner, actionlint and zizmor when .github/ changes and the reviewer (README of devkit, "One
+# OSV-Scanner, actionlint and zizmor when .github/ changes, the no-bloat ratchet and the reviewer (README of devkit, "One
 # job per pull request"). Exceptions to the shared-code check are in .shared.json with their reasons; to OSV-Scanner in
 # osv-scanner.toml; to the workflow audit in .github/actionlint.yaml and .github/zizmor.yml. What is shared:
 # https://github.com/DrDustinEdwards/devkit/blob/shared-list/SHARED.md
@@ -36,7 +36,7 @@ jobs:
     uses: DrDustinEdwards/devkit/.github/workflows/pr.yml@507d1be20e6cbf76badcfeaadf944818c66cf54f # v0.26.1
     with:
       review: true
-      # No Worker and no no-bloat baseline, so nothing to install: lint and the tests run in ci.yml.
-      node: false
+      # The root install is the lint tooling and devkit, as in ci.yml; no-bloat counts against .no-bloat.json.
+      install: npm ci --ignore-scripts
+      # No Worker.
       worker-size: false
-      no-bloat: false
