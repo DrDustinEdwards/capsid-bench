@@ -28,7 +28,7 @@ const HOSTS = ["https://api.drand.sh", "https://drand.cloudflare.com"];
 // R = floor((T - genesis) / period) + 1, and the time round R is produced.
 export function roundAt(t) {
   const seconds = Date.parse(t) / 1000;
-  if (!Number.isFinite(seconds) || !/Z$/.test(t)) throw new Error(`not a UTC instant: ${t}`);
+  if (!Number.isFinite(seconds) || !t.endsWith("Z")) throw new Error(`not a UTC instant: ${t}`);
   if (seconds < QUICKNET.genesis_time) throw new Error("T is before quicknet's genesis");
   return Math.floor((seconds - QUICKNET.genesis_time) / QUICKNET.period) + 1;
 }
