@@ -15,7 +15,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 
-function readJson(file) {
+function readJsonFile(file) {
   try {
     return JSON.parse(readFileSync(file, "utf8"));
   } catch {
@@ -107,8 +107,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const [flag, value] = [rest[i], rest[i + 1]];
     if (flag === "--run") opts.run = value;
     else if (flag === "--arm") opts.arm = value;
-    else if (flag === "--score") opts.score = readJson(value);
-    else if (flag === "--result") opts.results.push(readJson(value));
+    else if (flag === "--score") opts.score = readJsonFile(value);
+    else if (flag === "--result") opts.results.push(readJsonFile(value));
     else if (flag === "--claim") opts.claim = value === "true";
     else if (flag === "--job") opts.job = value;
     else if (flag === "--image-bytes") opts.imageBytes = value ? Number(value) : null;
