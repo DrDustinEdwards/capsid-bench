@@ -28,27 +28,57 @@ export const CUTOFF = "2026-06-30T23:59:59Z";
 export function checkTask(task) {
   const problems = [];
   const str = (field) => typeof task[field] === "string" && task[field].length > 0;
-  if (typeof task.task_id === "string" && !/^[A-Za-z0-9._-]{1,200}$/.test(task.task_id)) problems.push("task_id may hold only letters, digits, dot, underscore and hyphen (it names the file and reaches a shell)");
-  for (const field of ["task_id", "repo", "base_commit", "image", "problem_statement", "gold_patch", "issue_created_at"]) {
+  if (typeof task.task_id === "string" && !/^[A-Za-z0-9._-]{1,200}$/.test(task.task_id))
+    problems.push(
+      "task_id may hold only letters, digits, dot, underscore and hyphen (it names the file and reaches a shell)",
+    );
+  for (const field of [
+    "task_id",
+    "repo",
+    "base_commit",
+    "image",
+    "problem_statement",
+    "gold_patch",
+    "issue_created_at",
+  ]) {
     if (!str(field)) problems.push(`${field} must be a non-empty string`);
   }
   // These reach GITHUB_OUTPUT one per line, so a line break would write another output.
   for (const field of ["repo", "base_commit", "image", "setup"]) {
-    if (typeof task[field] === "string" && /[\r\n]/.test(task[field])) problems.push(`${field} may not hold a line break (it is written to GITHUB_OUTPUT)`);
+    if (typeof task[field] === "string" && /[\r\n]/.test(task[field]))
+      problems.push(`${field} may not hold a line break (it is written to GITHUB_OUTPUT)`);
   }
   if (!SOURCES.includes(task.source)) problems.push(`source must be one of ${SOURCES.join(", ")}`);
   if (!SPLITS.includes(task.split)) problems.push(`split must be one of ${SPLITS.join(", ")}`);
-  if (!Array.isArray(task.fail_to_pass) || task.fail_to_pass.length === 0) problems.push("fail_to_pass must list at least one test");
+  if (!Array.isArray(task.fail_to_pass) || task.fail_to_pass.length === 0)
+    problems.push("fail_to_pass must list at least one test");
   if (!Array.isArray(task.pass_to_pass)) problems.push("pass_to_pass must be a list");
-  if (str("issue_created_at") && !(Date.parse(task.issue_created_at) > Date.parse(CUTOFF)) && task.split !== "excluded") {
-    problems.push(`issue_created_at ${task.issue_created_at} is not after the cutoff ${CUTOFF}; such a task can only be split "excluded"`);
+  if (
+    str("issue_created_at") &&
+    !(Date.parse(task.issue_created_at) > Date.parse(CUTOFF)) &&
+    task.split !== "excluded"
+  ) {
+    problems.push(
+      `issue_created_at ${task.issue_created_at} is not after the cutoff ${CUTOFF}; such a task can only be split "excluded"`,
+    );
   }
   if (task.source === "own") {
-    if (!str("fix_commit")) problems.push("an own task needs fix_commit, the merged fix the hidden files come from");
-    if (!Array.isArray(task.hidden_files) || task.hidden_files.length === 0) problems.push("an own task needs hidden_files, the test files its fix added");
-    if (typeof task.setup !== "string") problems.push("an own task needs setup, the install command run with network before the tests");
-  } else if (!task.harness || typeof task.harness.dataset !== "string" || typeof task.harness.split !== "string") {
-    problems.push("a benchmark task needs harness.dataset and harness.split, which the benchmark's harness loads it by");
+    if (!str("fix_commit"))
+      problems.push("an own task needs fix_commit, the merged fix the hidden files come from");
+    if (!Array.isArray(task.hidden_files) || task.hidden_files.length === 0)
+      problems.push("an own task needs hidden_files, the test files its fix added");
+    if (typeof task.setup !== "string")
+      problems.push(
+        "an own task needs setup, the install command run with network before the tests",
+      );
+  } else if (
+    !task.harness ||
+    typeof task.harness.dataset !== "string" ||
+    typeof task.harness.split !== "string"
+  ) {
+    problems.push(
+      "a benchmark task needs harness.dataset and harness.split, which the benchmark's harness loads it by",
+    );
   }
   return problems;
 }
@@ -88,9 +118,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     writeFileSync(join(out, "agent", "problem.md"), task.problem_statement);
     writeFileSync(join(out, "private", "gold.patch"), task.gold_patch);
     writeFileSync(join(out, "private", "setup.sh"), task.setup ?? "");
-    writeFileSync(join(out, "private", "issue-message.md"), withIssue("issue.md", task.problem_statement, task.task_id));
+    writeFileSync(
+      join(out, "private", "issue-message.md"),
+      withIssue("issue.md", task.problem_statement, task.task_id),
+    );
     if (process.env.GITHUB_OUTPUT) {
-      appendFileSync(process.env.GITHUB_OUTPUT, `image=${task.image}\nsource=${task.source}\nbase_commit=${task.base_commit}\nrepo=${task.repo}\n`);
+      appendFileSync(
+        process.env.GITHUB_OUTPUT,
+        `image=${task.image}\nsource=${task.source}\nbase_commit=${task.base_commit}\nrepo=${task.repo}\n`,
+      );
     }
   } else if (command !== "check") {
     console.error(`task: unknown command ${command}`);

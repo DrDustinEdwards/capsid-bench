@@ -28,7 +28,7 @@ const HOSTS = ["https://api.drand.sh", "https://drand.cloudflare.com"];
 // R = floor((T - genesis) / period) + 1, and the time round R is produced.
 export function roundAt(t) {
   const seconds = Date.parse(t) / 1000;
-  if (!Number.isFinite(seconds) || !/Z$/.test(t)) throw new Error(`not a UTC instant: ${t}`);
+  if (!Number.isFinite(seconds) || !t.endsWith("Z")) throw new Error(`not a UTC instant: ${t}`);
   if (seconds < QUICKNET.genesis_time) throw new Error("T is before quicknet's genesis");
   return Math.floor((seconds - QUICKNET.genesis_time) / QUICKNET.period) + 1;
 }
@@ -46,10 +46,16 @@ export function roundMessage(round) {
 export function verifyBeacon(beacon, round, bls, publicKey = QUICKNET.public_key) {
   if (beacon.round !== round) throw new Error(`drand returned round ${beacon.round}, not ${round}`);
   const signature = Uint8Array.from(Buffer.from(beacon.signature, "hex"));
-  if (sha256(signature).toString("hex") !== beacon.randomness) throw new Error("the randomness is not the SHA-256 of the signature");
+  if (sha256(signature).toString("hex") !== beacon.randomness)
+    throw new Error("the randomness is not the SHA-256 of the signature");
   const sigs = bls.shortSignatures;
-  const ok = sigs.verify(signature, sigs.hash(Uint8Array.from(roundMessage(round)), DST), Uint8Array.from(Buffer.from(publicKey, "hex")));
-  if (!ok) throw new Error(`round ${round}'s signature does not verify against the quicknet public key`);
+  const ok = sigs.verify(
+    signature,
+    sigs.hash(Uint8Array.from(roundMessage(round)), DST),
+    Uint8Array.from(Buffer.from(publicKey, "hex")),
+  );
+  if (!ok)
+    throw new Error(`round ${round}'s signature does not verify against the quicknet public key`);
 }
 
 async function fetchJson(path) {
@@ -69,17 +75,32 @@ async function fetchJson(path) {
 async function main() {
   const { values } = parseArgs({ options: { t: { type: "string" }, round: { type: "string" } } });
   const round = values.t ? roundAt(values.t) : Number(values.round);
-  if (!Number.isInteger(round) || round < 1) throw new Error("give --t <UTC instant> or --round <n>");
-  if (roundTime(round) > Date.now() / 1000) throw new Error(`round ${round} is not out until ${new Date(roundTime(round) * 1000).toISOString()}`);
+  if (!Number.isInteger(round) || round < 1)
+    throw new Error("give --t <UTC instant> or --round <n>");
+  if (roundTime(round) > Date.now() / 1000)
+    throw new Error(
+      `round ${round} is not out until ${new Date(roundTime(round) * 1000).toISOString()}`,
+    );
   const info = await fetchJson("/info");
   for (const key of ["public_key", "genesis_time", "period", "scheme"]) {
     const theirs = key === "scheme" ? info.schemeID : info[key];
     if (theirs !== QUICKNET[key]) throw new Error(`drand's ${key} is not quicknet's`);
   }
-  const { bls12_381: bls } = await import(process.env.NOBLE_BLS ? pathToFileURL(process.env.NOBLE_BLS).href : "@noble/curves/bls12-381.js");
+  const { bls12_381: bls } = await import(
+    process.env.NOBLE_BLS ? pathToFileURL(process.env.NOBLE_BLS).href : "@noble/curves/bls12-381.js"
+  );
   const beacon = await fetchJson(`/public/${round}`);
   verifyBeacon(beacon, round, bls);
-  console.log(JSON.stringify({ t: values.t ?? null, round, round_time: new Date(roundTime(round) * 1000).toISOString(), chain_hash: QUICKNET.chain_hash, signature: beacon.signature, randomness: beacon.randomness }));
+  console.log(
+    JSON.stringify({
+      t: values.t ?? null,
+      round,
+      round_time: new Date(roundTime(round) * 1000).toISOString(),
+      chain_hash: QUICKNET.chain_hash,
+      signature: beacon.signature,
+      randomness: beacon.randomness,
+    }),
+  );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
