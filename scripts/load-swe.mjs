@@ -58,7 +58,13 @@ export function taskFromRow(row, { source, dataset, split, benchSplit, namespace
 export function candidates(rowList) {
   return rowList
     .filter((r) => typeof r.created_at === "string" && r.created_at > CUTOFF)
-    .map((r) => ({ id: r.instance_id, repo: r.repo, created_at: r.created_at, f2p: testList(r.FAIL_TO_PASS).length, p2p: testList(r.PASS_TO_PASS).length }))
+    .map((r) => ({
+      id: r.instance_id,
+      repo: r.repo,
+      created_at: r.created_at,
+      f2p: testList(r.FAIL_TO_PASS).length,
+      p2p: testList(r.PASS_TO_PASS).length,
+    }))
     .filter((c) => c.f2p > 0)
     .sort((a, b) => a.f2p + a.p2p - (b.f2p + b.p2p));
 }
@@ -84,7 +90,9 @@ async function rows(dataset, config, split, where) {
     : "https://datasets-server.huggingface.co/rows?";
   const all = [];
   for (let offset = 0; ; offset += 100) {
-    const page = await getJson(`${base}dataset=${encodeURIComponent(dataset)}&config=${encodeURIComponent(config)}&split=${encodeURIComponent(split)}&offset=${offset}&length=100`);
+    const page = await getJson(
+      `${base}dataset=${encodeURIComponent(dataset)}&config=${encodeURIComponent(config)}&split=${encodeURIComponent(split)}&offset=${offset}&length=100`,
+    );
     all.push(...page.rows.map((r) => r.row));
     if (page.rows.length < 100 || all.length >= page.num_rows_total) return all;
   }
@@ -94,26 +102,38 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const args = Object.fromEntries(
     process.argv
       .slice(2)
-      .reduce((pairs, v, i, a) => (i % 2 === 0 ? [...pairs, [v.replace(/^--/, ""), a[i + 1]]] : pairs), [])
+      .reduce(
+        (pairs, v, i, a) => (i % 2 === 0 ? [...pairs, [v.replace(/^--/, ""), a[i + 1]]] : pairs),
+        [],
+      ),
   );
   if ("list" in args) {
-    const { splits } = await getJson(`https://datasets-server.huggingface.co/splits?dataset=${encodeURIComponent(args.dataset)}`);
+    const { splits } = await getJson(
+      `https://datasets-server.huggingface.co/splits?dataset=${encodeURIComponent(args.dataset)}`,
+    );
     for (const { config, split } of splits) {
       let found;
       try {
-        found = candidates(await rows(args.dataset, config, split, `"created_at" > '${CUTOFF.slice(0, 10)}'`));
+        found = candidates(
+          await rows(args.dataset, config, split, `"created_at" > '${CUTOFF.slice(0, 10)}'`),
+        );
       } catch (err) {
-        console.log(`## ${config} / ${split}: could not be read (${err instanceof Error ? err.message : String(err)})`);
+        console.log(
+          `## ${config} / ${split}: could not be read (${err instanceof Error ? err.message : String(err)})`,
+        );
         continue;
       }
       console.log(`## ${config} / ${split}: ${found.length} after the cutoff`);
-      for (const c of found.slice(0, 40)) console.log(`${c.id}\t${c.repo}\t${c.created_at}\tF2P ${c.f2p}\tP2P ${c.p2p}`);
+      for (const c of found.slice(0, 40))
+        console.log(`${c.id}\t${c.repo}\t${c.created_at}\tF2P ${c.f2p}\tP2P ${c.p2p}`);
     }
     process.exit(0);
   }
   const ids = new Set((args.ids ?? "").split(/\s+/).filter(Boolean));
   if (!args.dataset || !args.split || !args["bench-split"] || ids.size === 0) {
-    console.error("usage: node scripts/load-swe.mjs --dataset D --split S --bench-split pilot|full --ids \"id1 id2\" [--config default] [--source swe-rebench] [--namespace swerebench]");
+    console.error(
+      'usage: node scripts/load-swe.mjs --dataset D --split S --bench-split pilot|full --ids "id1 id2" [--config default] [--source swe-rebench] [--namespace swerebench]',
+    );
     process.exit(2);
   }
   const opts = {
@@ -123,7 +143,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     benchSplit: args["bench-split"],
     namespace: args.namespace ?? "swerebench",
   };
-  const found = (await rows(args.dataset, args.config ?? "default", args.split)).filter((r) => ids.has(r.instance_id));
+  const found = (await rows(args.dataset, args.config ?? "default", args.split)).filter((r) =>
+    ids.has(r.instance_id),
+  );
   let bad = 0;
   for (const row of found) {
     const task = taskFromRow(row, opts);
@@ -134,7 +156,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       continue;
     }
     writeFileSync(join("tasks", `${task.task_id}.json`), `${JSON.stringify(task, null, 2)}\n`);
-    console.log(`wrote tasks/${task.task_id}.json (${task.fail_to_pass.length} FAIL_TO_PASS, ${task.pass_to_pass.length} PASS_TO_PASS)`);
+    console.log(
+      `wrote tasks/${task.task_id}.json (${task.fail_to_pass.length} FAIL_TO_PASS, ${task.pass_to_pass.length} PASS_TO_PASS)`,
+    );
   }
   const missing = [...ids].filter((id) => !found.some((r) => r.instance_id === id));
   if (missing.length) console.error(`not in ${args.dataset} ${args.split}: ${missing.join(", ")}`);

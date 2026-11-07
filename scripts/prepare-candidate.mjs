@@ -30,11 +30,21 @@ export const BASE_NOT_FOUND = "base commit not found";
 const API = "https://api.github.com";
 
 export function github(token, fetchImpl = fetch) {
-  const headers = { Authorization: `bearer ${token}`, "User-Agent": "capsid-bench-prepare", "X-GitHub-Api-Version": "2022-11-28" };
+  const headers = {
+    Authorization: `bearer ${token}`,
+    "User-Agent": "capsid-bench-prepare",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
   const call = async (path, accept = "application/vnd.github+json", init = {}) => {
     for (let attempt = 0; ; attempt++) {
-      const response = await fetchImpl(`${API}${path}`, { ...init, headers: { ...headers, Accept: accept, ...(init.headers ?? {}) } });
-      if ((response.status === 403 || response.status === 429 || response.status >= 500) && attempt < 6) {
+      const response = await fetchImpl(`${API}${path}`, {
+        ...init,
+        headers: { ...headers, Accept: accept, ...init.headers },
+      });
+      if (
+        (response.status === 403 || response.status === 429 || response.status >= 500) &&
+        attempt < 6
+      ) {
         await new Promise((r) => setTimeout(r, 5000 * 2 ** attempt));
         continue;
       }
@@ -46,8 +56,13 @@ export function github(token, fetchImpl = fetch) {
     rest: (path) => call(path),
     diff: (path) => call(path, "application/vnd.github.diff"),
     graphql: async (query, variables) => {
-      const body = await call("/graphql", "application/json", { method: "POST", body: JSON.stringify({ query, variables }), headers: { "Content-Type": "application/json" } });
-      if (body.errors?.length) throw new Error(`GitHub GraphQL: ${body.errors.map((e) => e.message).join("; ")}`);
+      const body = await call("/graphql", "application/json", {
+        method: "POST",
+        body: JSON.stringify({ query, variables }),
+        headers: { "Content-Type": "application/json" },
+      });
+      if (body.errors?.length)
+        throw new Error(`GitHub GraphQL: ${body.errors.map((e) => e.message).join("; ")}`);
       return body.data;
     },
   };
@@ -59,7 +74,8 @@ export function splitDiff(diff) {
   return parts.map((text) => ({ path: text.match(/^diff --git a\/(\S+) b\/(\S+)/)[2], text }));
 }
 
-const sameFiles = (a, b) => a.length === b.length && [...a].sort().every((x, i) => x === [...b].sort()[i]);
+const sameFiles = (a, b) =>
+  a.length === b.length && [...a].sort().every((x, i) => x === [...b].sort()[i]);
 
 // The base commit: see the header. `filesBetween(base, head)` lists the paths a compare
 // shows; `parentOf(sha)` is a commit's first parent.
@@ -79,7 +95,9 @@ export async function findBase(candidate, prCommits, { filesBetween, parentOf })
 // The issue body as it stood at `before` (the first fix commit's time). GitHub's edit
 // history lists each revision with the full text it left; the oldest is the original.
 export function bodyAt(issue, before) {
-  const edits = [...(issue.userContentEdits?.nodes ?? [])].filter((e) => e && typeof e.diff === "string").sort((a, b) => (a.editedAt < b.editedAt ? -1 : 1));
+  const edits = [...(issue.userContentEdits?.nodes ?? [])]
+    .filter((e) => e && typeof e.diff === "string")
+    .sort((a, b) => (a.editedAt < b.editedAt ? -1 : 1));
   if (!issue.lastEditedAt || issue.lastEditedAt <= before || edits.length === 0) return issue.body;
   const standing = edits.filter((e) => e.editedAt <= before);
   return (standing.length ? standing[standing.length - 1] : edits[0]).diff;
@@ -114,22 +132,47 @@ export async function editsBack(gh, vars, edits, before) {
 
 export async function prepare(gh, candidate, recipe) {
   const [owner, name] = candidate.repo.split("/");
-  const data = await gh.graphql(ISSUE, { owner, name, issue: candidate.issue.number, pr: candidate.pr });
+  const data = await gh.graphql(ISSUE, {
+    owner,
+    name,
+    issue: candidate.issue.number,
+    pr: candidate.pr,
+  });
   const { pullRequest } = data.repository;
   const firstCommit = pullRequest.commits.nodes[0]?.commit;
-  const firstFix = firstCommit ? [firstCommit.committedDate, firstCommit.authoredDate].sort()[0] : candidate.merged_at;
-  const issue = { ...data.repository.issue, userContentEdits: await editsBack(gh, { owner, name, issue: candidate.issue.number }, data.repository.issue.userContentEdits, firstFix) };
+  const firstFix = firstCommit
+    ? [firstCommit.committedDate, firstCommit.authoredDate].sort()[0]
+    : candidate.merged_at;
+  const issue = {
+    ...data.repository.issue,
+    userContentEdits: await editsBack(
+      gh,
+      { owner, name, issue: candidate.issue.number },
+      data.repository.issue.userContentEdits,
+      firstFix,
+    ),
+  };
 
   const base = await findBase(candidate, pullRequest.commits.totalCount, {
-    filesBetween: async (a, b) => splitDiff(await gh.diff(`/repos/${candidate.repo}/compare/${a}...${b}`)).map((p) => p.path),
-    parentOf: async (sha) => (await gh.rest(`/repos/${candidate.repo}/commits/${sha}`)).parents?.[0]?.sha ?? null,
+    filesBetween: async (a, b) =>
+      splitDiff(await gh.diff(`/repos/${candidate.repo}/compare/${a}...${b}`)).map((p) => p.path),
+    parentOf: async (sha) =>
+      (await gh.rest(`/repos/${candidate.repo}/commits/${sha}`)).parents?.[0]?.sha ?? null,
   });
   if (!base) return { task_id: candidate.task_id, excluded: BASE_NOT_FOUND };
   if (!recipe) return { task_id: candidate.task_id, excluded: "no recipe" };
 
-  const parts = splitDiff(await gh.diff(`/repos/${candidate.repo}/compare/${base}...${candidate.merge_commit}`));
-  const patch = parts.filter((p) => !isTestPath(p.path)).map((p) => p.text).join("");
-  const testPatch = parts.filter((p) => isTestPath(p.path)).map((p) => p.text).join("");
+  const parts = splitDiff(
+    await gh.diff(`/repos/${candidate.repo}/compare/${base}...${candidate.merge_commit}`),
+  );
+  const patch = parts
+    .filter((p) => !isTestPath(p.path))
+    .map((p) => p.text)
+    .join("");
+  const testPatch = parts
+    .filter((p) => isTestPath(p.path))
+    .map((p) => p.text)
+    .join("");
   return {
     instance_id: candidate.task_id,
     repo: candidate.repo,
@@ -153,7 +196,12 @@ export async function prepare(gh, candidate, recipe) {
 // if any identifier the gold patch introduces occurs in the issue as a whole word.
 // `introduced` is that list (see introducedIdentifiers).
 export function leakage(patch, problem, introduced = []) {
-  const issueLines = new Set(problem.split(/\r?\n/).map((l) => l.trim()).filter(Boolean));
+  const issueLines = new Set(
+    problem
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean),
+  );
   const matches = [];
   for (const line of patch.split("\n")) {
     if (!line.startsWith("+") || line.startsWith("+++")) continue;
@@ -189,7 +237,14 @@ export function introducedIdentifiers(patch, inBase) {
 }
 
 async function main() {
-  const { values } = parseArgs({ options: { frame: { type: "string" }, repos: { type: "string" }, task: { type: "string" }, out: { type: "string" } } });
+  const { values } = parseArgs({
+    options: {
+      frame: { type: "string" },
+      repos: { type: "string" },
+      task: { type: "string" },
+      out: { type: "string" },
+    },
+  });
   const frame = JSON.parse(readFileSync(values.frame, "utf8"));
   const repos = JSON.parse(readFileSync(values.repos, "utf8"));
   const candidate = frame.candidates.find((c) => c.task_id === values.task);
@@ -197,7 +252,11 @@ async function main() {
   const recipe = repos.repos.find((r) => r.repo === candidate.listed_as)?.recipe ?? null;
   const result = await prepare(github(process.env.GITHUB_TOKEN), candidate, recipe);
   writeFileSync(values.out, `${JSON.stringify(result, null, 1)}\n`);
-  console.log(result.excluded ? `${values.task}: excluded, ${result.excluded}` : `${values.task}: base ${result.base_commit}`);
+  console.log(
+    result.excluded
+      ? `${values.task}: excluded, ${result.excluded}`
+      : `${values.task}: base ${result.base_commit}`,
+  );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

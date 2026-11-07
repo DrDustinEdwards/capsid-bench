@@ -17,7 +17,10 @@ export function verifierResult(score) {
   const { total, passed } = score.hidden.pass_to_pass;
   const failures = score.pass_to_pass_failures ?? [];
   if (failures.length === 0) return `All ${total} existing tests it ran passed.`;
-  const listed = failures.slice(0, 50).map((name) => `- ${name}`).join("\n");
+  const listed = failures
+    .slice(0, 50)
+    .map((name) => `- ${name}`)
+    .join("\n");
   const more = failures.length > 50 ? `\n- and ${failures.length - 50} more` : "";
   return `${passed} of ${total} existing tests passed. These failed:\n${listed}${more}`;
 }
@@ -29,6 +32,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } catch {
     // An unreadable score reads as the verifier not running.
   }
-  const template = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "prompts", "verifier.md"), "utf8");
+  const template = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "prompts", "verifier.md"),
+    "utf8",
+  );
   process.stdout.write(template.replace("{{VERIFIER_RESULT}}", () => verifierResult(score)));
 }

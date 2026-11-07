@@ -42,9 +42,15 @@ async function rpc(url, key, session, message) {
     },
     body: JSON.stringify(message),
   });
-  if (!response.ok) throw new Error(`${message.method} answered ${response.status}: ${(await response.text()).slice(0, 300)}`);
+  if (!response.ok)
+    throw new Error(
+      `${message.method} answered ${response.status}: ${(await response.text()).slice(0, 300)}`,
+    );
   const text = await response.text();
-  return { session: response.headers.get("mcp-session-id") ?? session, payload: text ? rpcPayload(text) : null };
+  return {
+    session: response.headers.get("mcp-session-id") ?? session,
+    payload: text ? rpcPayload(text) : null,
+  };
 }
 
 async function call(url, key, args) {
@@ -52,11 +58,23 @@ async function call(url, key, args) {
     jsonrpc: "2.0",
     id: 1,
     method: "initialize",
-    params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "capsid-bench", version: "1" } },
+    params: {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "capsid-bench", version: "1" },
+    },
   });
   await rpc(url, key, init.session, { jsonrpc: "2.0", method: "notifications/initialized" });
-  const answer = await rpc(url, key, init.session, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "capsid_work_jobs", arguments: args } });
-  return { text: answer.payload?.result?.content?.find((c) => c.type === "text")?.text ?? "", isError: Boolean(answer.payload?.result?.isError) };
+  const answer = await rpc(url, key, init.session, {
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: { name: "capsid_work_jobs", arguments: args },
+  });
+  return {
+    text: answer.payload?.result?.content?.find((c) => c.type === "text")?.text ?? "",
+    isError: Boolean(answer.payload?.result?.isError),
+  };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
