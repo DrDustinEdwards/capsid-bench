@@ -42,13 +42,15 @@ export function transitKey(benchKey, runId) {
 // Every regular file of `dir`, by name, base64.
 export function packFiles(dir) {
   const files = {};
-  for (const entry of readdirSync(dir, { withFileTypes: true })) if (entry.isFile()) files[entry.name] = readFileSync(join(dir, entry.name)).toString("base64");
+  for (const entry of readdirSync(dir, { withFileTypes: true }))
+    if (entry.isFile()) files[entry.name] = readFileSync(join(dir, entry.name)).toString("base64");
   return files;
 }
 export function unpackFiles(files, dir) {
   mkdirSync(dir, { recursive: true });
   for (const [name, data] of Object.entries(files)) {
-    if (!/^[A-Za-z0-9._-]+$/.test(name) || name.startsWith(".")) throw new Error(`refusing the file name ${JSON.stringify(name)}`);
+    if (!/^[A-Za-z0-9._-]+$/.test(name) || name.startsWith("."))
+      throw new Error(`refusing the file name ${JSON.stringify(name)}`);
     writeFileSync(join(dir, name), Buffer.from(data, "base64"));
   }
 }
@@ -68,7 +70,10 @@ export function unlock(key, sealed) {
 // R_seal, refused once it has been published: a ciphertext to a past round hides nothing.
 export function sealRound(tSeal, now = Date.now()) {
   const round = roundAt(tSeal);
-  if (now / 1000 >= roundTime(round)) throw new Error(`round ${round} (T_seal ${tSeal}) is already published, so a seal to it would hide nothing`);
+  if (now / 1000 >= roundTime(round))
+    throw new Error(
+      `round ${round} (T_seal ${tSeal}) is already published, so a seal to it would hide nothing`,
+    );
   return round;
 }
 
@@ -76,7 +81,12 @@ export function sealRound(tSeal, now = Date.now()) {
 // they say nothing about the outcome; Capsid still checks them against the registration.
 export function redact(report, sealed) {
   const sizes = report.hidden
-    ? { hidden: { fail_to_pass: { total: report.hidden.fail_to_pass.total }, pass_to_pass: { total: report.hidden.pass_to_pass.total } } }
+    ? {
+        hidden: {
+          fail_to_pass: { total: report.hidden.fail_to_pass.total },
+          pass_to_pass: { total: report.hidden.pass_to_pass.total },
+        },
+      }
     : {};
   return {
     run_id: report.run_id,
@@ -84,7 +94,10 @@ export function redact(report, sealed) {
     ...sizes,
     stopped_on_error: report.stopped_on_error === true,
     capsid_job_id: report.capsid_job_id ?? null,
-    usage: { model: report.usage?.model ?? null, claude_code_version: report.usage?.claude_code_version ?? null },
+    usage: {
+      model: report.usage?.model ?? null,
+      claude_code_version: report.usage?.claude_code_version ?? null,
+    },
     image_bytes: report.image_bytes ?? null,
     sealed,
   };
@@ -92,7 +105,10 @@ export function redact(report, sealed) {
 
 // A run that could not be sealed is unjudged, and carries nothing else.
 export function refusal(report, reason) {
-  return { run_id: report.run_id, environment: { ok: false, reason: `the run could not be sealed: ${reason}`.slice(0, 500) } };
+  return {
+    run_id: report.run_id,
+    environment: { ok: false, reason: `the run could not be sealed: ${reason}`.slice(0, 500) },
+  };
 }
 
 export function bundleOf(report, score, files) {
@@ -101,7 +117,8 @@ export function bundleOf(report, score, files) {
 
 function modules() {
   const dir = process.env.SEAL_MODULES;
-  if (!dir) throw new Error("set SEAL_MODULES to the node_modules directory holding tlock-js and sigstore");
+  if (!dir)
+    throw new Error("set SEAL_MODULES to the node_modules directory holding tlock-js and sigstore");
   const require = createRequire(join(dir, "seal.cjs"));
   return { tlock: require("tlock-js"), sigstore: require("sigstore") };
 }
@@ -117,7 +134,13 @@ async function seal({ t, report: reportFile, score: scoreFile, dir, out }) {
   })();
   const round = sealRound(t);
   const { tlock, sigstore } = modules();
-  const ciphertext = Buffer.from(await tlock.timelockEncrypt(round, bundleOf(report, score, packFiles(dir)), tlock.mainnetClient()));
+  const ciphertext = Buffer.from(
+    await tlock.timelockEncrypt(
+      round,
+      bundleOf(report, score, packFiles(dir)),
+      tlock.mainnetClient(),
+    ),
+  );
   const bundle = await sigstore.sign(ciphertext);
   const entry = bundle.verificationMaterial?.tlogEntries?.[0];
   if (!entry) throw new Error("Sigstore returned no Rekor entry");
@@ -126,7 +149,9 @@ async function seal({ t, report: reportFile, score: scoreFile, dir, out }) {
   writeFileSync(join(out, `${report.run_id}.sigstore.json`), `${JSON.stringify(bundle)}\n`);
   const sealed = { sha256: sha256(ciphertext), log_index: Number(entry.logIndex) };
   writeFileSync(join(out, "redacted.json"), JSON.stringify(redact(report, sealed)));
-  console.log(`sealed ${report.run_id} to round ${round}: sha256 ${sealed.sha256}, Rekor index ${sealed.log_index}`);
+  console.log(
+    `sealed ${report.run_id} to round ${round}: sha256 ${sealed.sha256}, Rekor index ${sealed.log_index}`,
+  );
 }
 
 async function main() {
@@ -134,19 +159,39 @@ async function main() {
   const { values, positionals } = parseArgs({
     args: rest,
     allowPositionals: true,
-    options: { t: { type: "string" }, report: { type: "string" }, score: { type: "string" }, dir: { type: "string" }, out: { type: "string" }, reason: { type: "string" } },
+    options: {
+      t: { type: "string" },
+      report: { type: "string" },
+      score: { type: "string" },
+      dir: { type: "string" },
+      out: { type: "string" },
+      reason: { type: "string" },
+    },
   });
   const runId = () => process.env.RUN_ID;
   if (command === "pack") {
     const [dir, out] = positionals;
-    writeFileSync(out, lock(transitKey(process.env.BENCH_KEY, runId()), Buffer.from(JSON.stringify(packFiles(dir)))));
+    writeFileSync(
+      out,
+      lock(transitKey(process.env.BENCH_KEY, runId()), Buffer.from(JSON.stringify(packFiles(dir)))),
+    );
   } else if (command === "unpack") {
     const [file, dir] = positionals;
-    unpackFiles(JSON.parse(unlock(transitKey(process.env.BENCH_KEY, runId()), readFileSync(file)).toString("utf8")), dir);
+    unpackFiles(
+      JSON.parse(
+        unlock(transitKey(process.env.BENCH_KEY, runId()), readFileSync(file)).toString("utf8"),
+      ),
+      dir,
+    );
   } else if (command === "seal") {
     await seal(values);
   } else if (command === "refuse") {
-    writeFileSync(values.out, JSON.stringify(refusal(JSON.parse(readFileSync(values.report, "utf8")), values.reason ?? "unknown")));
+    writeFileSync(
+      values.out,
+      JSON.stringify(
+        refusal(JSON.parse(readFileSync(values.report, "utf8")), values.reason ?? "unknown"),
+      ),
+    );
   } else {
     throw new Error("usage: seal.mjs pack|unpack|seal|refuse ...");
   }

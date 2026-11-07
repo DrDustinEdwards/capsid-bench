@@ -42,11 +42,17 @@ export function countsFromReport(task, instanceReport) {
     const success = new Set(lists?.success ?? []);
     const failure = new Set(lists?.failure ?? []);
     const ran = names.filter((n) => success.has(n) || failure.has(n));
-    return { counts: { total: ran.length, passed: ran.filter((n) => success.has(n)).length }, failed: ran.filter((n) => failure.has(n)) };
+    return {
+      counts: { total: ran.length, passed: ran.filter((n) => success.has(n)).length },
+      failed: ran.filter((n) => failure.has(n)),
+    };
   };
   const f2p = pair(task.fail_to_pass, status.FAIL_TO_PASS);
   const p2p = pair(task.pass_to_pass, status.PASS_TO_PASS);
-  return { hidden: { fail_to_pass: f2p.counts, pass_to_pass: p2p.counts }, pass_to_pass_failures: p2p.failed };
+  return {
+    hidden: { fail_to_pass: f2p.counts, pass_to_pass: p2p.counts },
+    pass_to_pass_failures: p2p.failed,
+  };
 }
 
 // What the dataset defines for the base commit (see scoreBenchmark).
@@ -81,7 +87,10 @@ function scoreBenchmark(task, diff, work) {
   // done would be unjudged instead of a false claim.
   if (!diff.trim()) return emptyDiffScore(task);
   const preds = join(work, "preds.json");
-  writeFileSync(preds, JSON.stringify([{ instance_id: task.task_id, model_name_or_path: "bench", model_patch: diff }]));
+  writeFileSync(
+    preds,
+    JSON.stringify([{ instance_id: task.task_id, model_name_or_path: "bench", model_patch: diff }]),
+  );
   const runId = `bench-${process.pid}`;
   const harness = run(
     "python3",
@@ -107,13 +116,25 @@ function scoreBenchmark(task, diff, work) {
       "--timeout",
       "1800",
     ],
-    { cwd: work }
+    { cwd: work },
   );
   process.stderr.write(harness.out.slice(-4000));
-  const reportPath = join(work, "logs", "run_evaluation", runId, "bench", task.task_id, "report.json");
-  if (!existsSync(reportPath)) return { environment: { ok: false, reason: `the harness wrote no report (exit ${harness.status})` } };
+  const reportPath = join(
+    work,
+    "logs",
+    "run_evaluation",
+    runId,
+    "bench",
+    task.task_id,
+    "report.json",
+  );
+  if (!existsSync(reportPath))
+    return {
+      environment: { ok: false, reason: `the harness wrote no report (exit ${harness.status})` },
+    };
   const counts = countsFromReport(task, JSON.parse(readFileSync(reportPath, "utf8"))[task.task_id]);
-  if (!counts) return { environment: { ok: false, reason: "the harness report has no entry for this task" } };
+  if (!counts)
+    return { environment: { ok: false, reason: "the harness report has no entry for this task" } };
   return { environment: { ok: true, reason: null }, ...counts };
 }
 
@@ -125,12 +146,30 @@ function scoreOwn(task, diffFile, work) {
   ];
   for (const [cmd, args] of steps) {
     const r = run(cmd, args);
-    if (r.status !== 0) return { environment: { ok: false, reason: `${cmd} ${args[0] === "-C" ? args[2] : args[0]} failed: ${r.out.slice(-300)}` } };
+    if (r.status !== 0)
+      return {
+        environment: {
+          ok: false,
+          reason: `${cmd} ${args[0] === "-C" ? args[2] : args[0]} failed: ${r.out.slice(-300)}`,
+        },
+      };
   }
   // Setup runs with network on the base commit, before any agent byte is on disk, so the
   // agent's code never runs with network. Dependencies the diff adds are not installed.
-  const setup = run("docker", ["run", "--rm", "-v", `${repo}:/testbed`, "-w", "/testbed", task.image, "sh", "-c", task.setup]);
-  if (setup.status !== 0) return { environment: { ok: false, reason: `setup failed: ${setup.out.slice(-300)}` } };
+  const setup = run("docker", [
+    "run",
+    "--rm",
+    "-v",
+    `${repo}:/testbed`,
+    "-w",
+    "/testbed",
+    task.image,
+    "sh",
+    "-c",
+    task.setup,
+  ]);
+  if (setup.status !== 0)
+    return { environment: { ok: false, reason: `setup failed: ${setup.out.slice(-300)}` } };
   const diff = readFileSync(diffFile, "utf8");
   if (diff.trim()) {
     const applied = run("git", ["-C", repo, "apply", "--whitespace=nowarn", diffFile]);
@@ -142,14 +181,37 @@ function scoreOwn(task, diffFile, work) {
     }
   }
   const hidden = run("git", ["-C", repo, "fetch", "--quiet", "origin", task.fix_commit]);
-  const checkout = hidden.status === 0 ? run("git", ["-C", repo, "checkout", task.fix_commit, "--", ...task.hidden_files]) : hidden;
-  if (checkout.status !== 0) return { environment: { ok: false, reason: `could not stage the hidden test files: ${checkout.out.slice(-300)}` } };
+  const checkout =
+    hidden.status === 0
+      ? run("git", ["-C", repo, "checkout", task.fix_commit, "--", ...task.hidden_files])
+      : hidden;
+  if (checkout.status !== 0)
+    return {
+      environment: {
+        ok: false,
+        reason: `could not stage the hidden test files: ${checkout.out.slice(-300)}`,
+      },
+    };
   let machine = null;
   const passes = (command) => {
     if (machine) return false;
-    const r = run("docker", ["run", "--rm", "--network", "none", "-v", `${repo}:/testbed`, "-w", "/testbed", task.image, "sh", "-c", command]);
+    const r = run("docker", [
+      "run",
+      "--rm",
+      "--network",
+      "none",
+      "-v",
+      `${repo}:/testbed`,
+      "-w",
+      "/testbed",
+      task.image,
+      "sh",
+      "-c",
+      command,
+    ]);
     const outcome = testOutcome(r.status);
-    if (outcome === "machine") machine = `docker could not run a test command (exit ${r.status}): ${r.out.slice(-300)}`;
+    if (outcome === "machine")
+      machine = `docker could not run a test command (exit ${r.status}): ${r.out.slice(-300)}`;
     return outcome === "pass";
   };
   const f2p = task.fail_to_pass.filter(passes).length;
@@ -159,7 +221,10 @@ function scoreOwn(task, diffFile, work) {
     environment: { ok: true, reason: null },
     hidden: {
       fail_to_pass: { total: task.fail_to_pass.length, passed: f2p },
-      pass_to_pass: { total: task.pass_to_pass.length, passed: task.pass_to_pass.length - p2pFailed.length },
+      pass_to_pass: {
+        total: task.pass_to_pass.length,
+        passed: task.pass_to_pass.length - p2pFailed.length,
+      },
     },
     pass_to_pass_failures: p2pFailed,
   };
@@ -172,9 +237,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   mkdirSync(work, { recursive: true });
   let result;
   try {
-    result = task.source === "own" ? scoreOwn(task, diffFile, work) : scoreBenchmark(task, readFileSync(diffFile, "utf8"), work);
+    result =
+      task.source === "own"
+        ? scoreOwn(task, diffFile, work)
+        : scoreBenchmark(task, readFileSync(diffFile, "utf8"), work);
   } catch (err) {
-    result = { environment: { ok: false, reason: `the scorer threw: ${err instanceof Error ? err.message : String(err)}` } };
+    result = {
+      environment: {
+        ok: false,
+        reason: `the scorer threw: ${err instanceof Error ? err.message : String(err)}`,
+      },
+    };
   }
   writeFileSync(out, JSON.stringify(result));
   // The log is public (bench-run.yml, "PUBLIC REPOSITORY"), so it never shows a result.

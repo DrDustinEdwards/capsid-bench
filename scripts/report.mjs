@@ -25,8 +25,18 @@ function readJson(file) {
 
 export function sumUsage(results) {
   const real = results.filter((r) => r && typeof r === "object");
-  if (real.length === 0) return { cost_usd: null, turns: null, duration_ms: null, input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null };
-  const sum = (pick) => real.reduce((total, r) => total + (Number.isFinite(pick(r)) ? pick(r) : 0), 0);
+  if (real.length === 0)
+    return {
+      cost_usd: null,
+      turns: null,
+      duration_ms: null,
+      input_tokens: null,
+      output_tokens: null,
+      cache_read_tokens: null,
+      cache_creation_tokens: null,
+    };
+  const sum = (pick) =>
+    real.reduce((total, r) => total + (Number.isFinite(pick(r)) ? pick(r) : 0), 0);
   return {
     cost_usd: sum((r) => r.total_cost_usd),
     turns: sum((r) => r.num_turns),
@@ -48,7 +58,8 @@ export function modelFailure(arm, results, timedOut = false) {
   if (arm !== "baseline" && arm !== "treatment") return null;
   if (timedOut || stoppedOnError(results)) return null;
   const first = results[0];
-  if (!first || typeof first !== "object") return "Claude Code produced no result and was not killed at the time budget (it never started)";
+  if (!first || typeof first !== "object")
+    return "Claude Code produced no result and was not killed at the time budget (it never started)";
   return null;
 }
 
@@ -56,9 +67,24 @@ export function stoppedOnError(results) {
   return results.some((r) => r && r.subtype === "error_during_execution");
 }
 
-export function buildReport({ run, arm, score, results, claim, job, imageBytes, model, version, machineFailed, timedOut, stopped }) {
+export function buildReport({
+  run,
+  arm,
+  score,
+  results,
+  claim,
+  job,
+  imageBytes,
+  model,
+  version,
+  machineFailed,
+  timedOut,
+  stopped,
+}) {
   const failure = machineFailed || modelFailure(arm, results, timedOut === true);
-  const environment = failure ? { ok: false, reason: failure } : (score?.environment ?? { ok: false, reason: "the scorer produced no output" });
+  const environment = failure
+    ? { ok: false, reason: failure }
+    : (score?.environment ?? { ok: false, reason: "the scorer produced no output" });
   return {
     run_id: run,
     environment,
@@ -66,7 +92,8 @@ export function buildReport({ run, arm, score, results, claim, job, imageBytes, 
     // Every arm's claim comes from the claim file (scripts/read-claims.mjs), read the
     // same way; the treatment's job status is not its claim.
     claimed_done: claim === true,
-    stopped_on_error: (arm === "baseline" || arm === "treatment") && (stopped === true || stoppedOnError(results)),
+    stopped_on_error:
+      (arm === "baseline" || arm === "treatment") && (stopped === true || stoppedOnError(results)),
     capsid_job_id: job || null,
     usage: { model: model || null, claude_code_version: version || null, ...sumUsage(results) },
     image_bytes: Number.isInteger(imageBytes) ? imageBytes : null,

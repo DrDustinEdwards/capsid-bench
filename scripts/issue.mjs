@@ -12,12 +12,17 @@ import { fileURLToPath } from "node:url";
 const prompts = join(dirname(fileURLToPath(import.meta.url)), "..", "prompts");
 
 export function fenceIssue(problem, taskId) {
-  const escaped = problem.replace(/^([ \t]{0,3})(~{3,})/gm, (_m, indent, tildes) => `${indent}\\${tildes}`);
+  const escaped = problem.replace(
+    /^([ \t]{0,3})(~{3,})/gm,
+    (_m, indent, tildes) => `${indent}\\${tildes}`,
+  );
   const ref = taskId.replace(/\s+/g, " ").slice(0, 120);
   return `~~~external source=issue ref=${ref}\n${escaped}\n~~~`;
 }
 
 // prompts/<name> with {{ISSUE}} replaced by the fenced issue.
 export function withIssue(name, problem, taskId) {
-  return readFileSync(join(prompts, name), "utf8").replace("{{ISSUE}}", () => fenceIssue(problem, taskId));
+  return readFileSync(join(prompts, name), "utf8").replace("{{ISSUE}}", () =>
+    fenceIssue(problem, taskId),
+  );
 }

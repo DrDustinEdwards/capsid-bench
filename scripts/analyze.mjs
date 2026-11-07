@@ -57,14 +57,19 @@ export function outageHours(runs) {
     if (stoppedOnError(run)) h.errors++;
     hours.set(hourOf(run.finished_at), h);
   }
-  return new Set([...hours].filter(([, h]) => h.ended >= OUTAGE_MIN_ENDED && h.errors * 2 >= h.ended).map(([hour]) => hour));
+  return new Set(
+    [...hours]
+      .filter(([, h]) => h.ended >= OUTAGE_MIN_ENDED && h.errors * 2 >= h.ended)
+      .map(([hour]) => hour),
+  );
 }
 
 // The run's status as the analysis reads it. An error stop is scored the first time
 // (section 3, "Error stops", revised 2026-10-22), except one that ended in an outage hour,
 // which is held back whatever Capsid recorded.
 export function analysisStatus(run, outage) {
-  if (run.status === "scored" && stoppedOnError(run) && outage.has(hourOf(run.finished_at))) return "outage";
+  if (run.status === "scored" && stoppedOnError(run) && outage.has(hourOf(run.finished_at)))
+    return "outage";
   return run.status;
 }
 
@@ -98,7 +103,8 @@ export function slots(runs, outage) {
     if (status === "outage") continue;
     if (waiting) {
       waiting = false;
-      out[out.length - 1] = status === "scored" ? run : status === "unjudged" || status === "missing" ? null : "open";
+      out[out.length - 1] =
+        status === "scored" ? run : status === "unjudged" || status === "missing" ? null : "open";
       continue;
     }
     if (out.length === SLOTS) break;
@@ -143,12 +149,19 @@ export function bootstrap(items, resamples, random, { byRepository = false } = {
   const stats = new Float64Array(resamples);
   for (let r = 0; r < resamples; r++) {
     const picked = [];
-    for (let i = 0; i < clusters.length; i++) picked.push(clusters[Math.floor(random() * clusters.length)]);
+    for (let i = 0; i < clusters.length; i++)
+      picked.push(clusters[Math.floor(random() * clusters.length)]);
     stats[r] = statistic(picked);
   }
   stats.sort();
   const at = (q) => stats[Math.min(resamples - 1, Math.max(0, Math.floor(q * resamples)))];
-  return { estimate, low: at(0.025), high: at(0.975), tasks: items.length, repositories: clusters.length };
+  return {
+    estimate,
+    low: at(0.025),
+    high: at(0.975),
+    tasks: items.length,
+    repositories: clusters.length,
+  };
 }
 
 // The repository cap (section 4, "Draw"): at most 2 accepted tasks from one repository.
@@ -165,16 +178,21 @@ export function repositories(drawn, tasks) {
     count.set(repo, (count.get(repo) ?? 0) + 1);
   }
   const over = [...count].filter(([, n]) => n > REPO_CAP).map(([repo]) => repo);
-  if (over.length) throw new Error(`the draw has more than ${REPO_CAP} tasks from ${over.join(", ")}`);
+  if (over.length)
+    throw new Error(`the draw has more than ${REPO_CAP} tasks from ${over.join(", ")}`);
   return {
     repositories: count.size,
     max_tasks_per_repository: Math.max(0, ...count.values()),
-    at_cap: [...count].filter(([, n]) => n === REPO_CAP).map(([repo]) => repo).sort(),
+    at_cap: [...count]
+      .filter(([, n]) => n === REPO_CAP)
+      .map(([repo]) => repo)
+      .sort(),
   };
 }
 
 // The primary set: tasks with 3 scored runs in each arm, run in order.
-const complete = (t) => !t.out_of_order && t.baseline.length === SLOTS && t.treatment.length === SLOTS;
+const complete = (t) =>
+  !t.out_of_order && t.baseline.length === SLOTS && t.treatment.length === SLOTS;
 
 // Whether one task's model runs, in start order, break the alternating order. Capsid's
 // rule (src/bench.ts orderRefusal), replayed: the next slot is baseline when both arms have
@@ -204,7 +222,10 @@ export function outOfOrder(runs, outage) {
 // Per task in the primary set, each arm's scored-run rate of one label; the difference is
 // treatment minus baseline.
 function differences(perTask, key) {
-  return perTask.filter(complete).map((t) => ({ repo: t.repo, value: mean(t.treatment.map((l) => l[key])) - mean(t.baseline.map((l) => l[key])) }));
+  return perTask.filter(complete).map((t) => ({
+    repo: t.repo,
+    value: mean(t.treatment.map((l) => l[key])) - mean(t.baseline.map((l) => l[key])),
+  }));
 }
 
 // The pre-specified bounds: every slot with no scored run, on every task with a model
@@ -216,8 +237,13 @@ function bounded(perTask, key, againstTreatment) {
   const fillT = againstTreatment ? badT : 1 - badT;
   const fillB = againstTreatment ? goodB : 1 - goodB;
   return perTask.map((t) => {
-    const arm = (scored, missing, fill) => mean([...scored.map((l) => l[key]), ...Array(missing).fill(fill)]);
-    return { repo: t.repo, value: arm(t.treatment, t.missing.treatment, fillT) - arm(t.baseline, t.missing.baseline, fillB) };
+    const arm = (scored, missing, fill) =>
+      mean([...scored.map((l) => l[key]), ...Array(missing).fill(fill)]);
+    return {
+      repo: t.repo,
+      value:
+        arm(t.treatment, t.missing.treatment, fillT) - arm(t.baseline, t.missing.baseline, fillB),
+    };
   });
 }
 
@@ -238,10 +264,13 @@ export function allowedSentence(primary, b, resolution, nonMarking) {
     return `Below the floor (${primary.tasks} primary-set tasks from ${primary.repositories} repositories; ${FLOOR_TASKS} from ${FLOOR_REPOSITORIES} needed): estimates and intervals only, not confirmatory.`;
   }
   if (!nonMarking || nonMarking.share > NON_MARKING_MAX) {
-    const why = nonMarking ? `${nonMarking.none} of ${nonMarking.audited} second-reader responses did not mark in or out` : "the second reader's log was not given";
+    const why = nonMarking
+      ? `${nonMarking.none} of ${nonMarking.audited} second-reader responses did not mark in or out`
+      : "the second reader's log was not given";
     return `Not confirmatory: ${why} (at most ${NON_MARKING_MAX * 100}% allowed). Estimates and intervals only.`;
   }
-  if (b.high < 0 && resolution.low > -MARGIN) return "The treatment is favored: the (b) interval lies entirely below zero and the resolution interval entirely above -10 points.";
+  if (b.high < 0 && resolution.low > -MARGIN)
+    return "The treatment is favored: the (b) interval lies entirely below zero and the resolution interval entirely above -10 points.";
   return "Neither arm is favored: estimates and intervals only.";
 }
 
@@ -261,33 +290,61 @@ export function acceptedCounts(accepted, drawn, tasks) {
   const inDraw = new Set(drawn);
   const missing = ids.filter((id) => !inDraw.has(id));
   const extra = drawn.filter((id) => !ids.includes(id));
-  if (missing.length || extra.length) throw new Error(`the draw is not the accepted set (missing ${missing.length}, extra ${extra.length})`);
+  if (missing.length || extra.length)
+    throw new Error(
+      `the draw is not the accepted set (missing ${missing.length}, extra ${extra.length})`,
+    );
   for (const a of accepted) {
-    if (tasks.get(a.task_id)?.repo !== a.repo) throw new Error(`accepted task ${a.task_id} names repository ${a.repo}, the registered task another`);
+    if (tasks.get(a.task_id)?.repo !== a.repo)
+      throw new Error(
+        `accepted task ${a.task_id} names repository ${a.repo}, the registered task another`,
+      );
   }
   return { tasks: ids.length, repositories: new Set(accepted.map((a) => a.repo)).size };
 }
 
 // The whole analysis over an export. Returns { sealed: true, ... } with counts only while
 // the seal holds.
-export function analyze(data, { accepted, audit, seed = "capsid-bench", resamples = 10000, flagged = [] }) {
+export function analyze(
+  data,
+  { accepted, audit, seed = "capsid-bench", resamples = 10000, flagged = [] },
+) {
   const tasks = new Map(data.tasks.map((t) => [t.task_id, t]));
   const drawn = [...data.draw].sort((x, y) => x.position - y.position).map((d) => d.task_id);
   const repos = repositories(drawn, tasks);
   const acceptedSet = acceptedCounts(accepted, drawn, tasks);
-  const unopened = data.runs.find((run) => run.status === "scored" && reportOf(run).sealed && !Number.isInteger(run.fail_to_pass_passed));
-  if (unopened) throw new Error(`run ${unopened.id} is still sealed: open the export with scripts/unseal.mjs first`);
+  const unopened = data.runs.find(
+    (run) =>
+      run.status === "scored" && reportOf(run).sealed && !Number.isInteger(run.fail_to_pass_passed),
+  );
+  if (unopened)
+    throw new Error(
+      `run ${unopened.id} is still sealed: open the export with scripts/unseal.mjs first`,
+    );
   const outage = outageHours(data.runs);
   const byTaskArm = new Map();
-  for (const run of [...data.runs].sort((x, y) => (x.started_at < y.started_at ? -1 : x.started_at > y.started_at ? 1 : 0))) {
+  for (const run of [...data.runs].sort((x, y) =>
+    x.started_at < y.started_at ? -1 : x.started_at > y.started_at ? 1 : 0,
+  )) {
     if (!MODEL_ARMS.includes(run.arm)) continue;
     const key = `${run.task_id}\u0000${run.arm}`;
     byTaskArm.set(key, [...(byTaskArm.get(key) ?? []), run]);
   }
-  const started = drawn.filter((id) => MODEL_ARMS.some((arm) => byTaskArm.has(`${id}\u0000${arm}`)));
-  const startOrder = (id) => MODEL_ARMS.flatMap((arm) => byTaskArm.get(`${id}\u0000${arm}`) ?? []).sort((x, y) => (x.started_at < y.started_at ? -1 : x.started_at > y.started_at ? 1 : 0));
+  const started = drawn.filter((id) =>
+    MODEL_ARMS.some((arm) => byTaskArm.has(`${id}\u0000${arm}`)),
+  );
+  const startOrder = (id) =>
+    MODEL_ARMS.flatMap((arm) => byTaskArm.get(`${id}\u0000${arm}`) ?? []).sort((x, y) =>
+      x.started_at < y.started_at ? -1 : x.started_at > y.started_at ? 1 : 0,
+    );
   const perTask = started.map((id) => {
-    const row = { task_id: id, repo: tasks.get(id).repo, missing: {}, finished: true, out_of_order: outOfOrder(startOrder(id), outage) };
+    const row = {
+      task_id: id,
+      repo: tasks.get(id).repo,
+      missing: {},
+      finished: true,
+      out_of_order: outOfOrder(startOrder(id), outage),
+    };
     for (const arm of MODEL_ARMS) {
       const s = slots(byTaskArm.get(`${id}\u0000${arm}`) ?? [], outage);
       if (s.length < SLOTS || s.includes("open")) row.finished = false;
@@ -298,9 +355,23 @@ export function analyze(data, { accepted, audit, seed = "capsid-bench", resample
     return row;
   });
   const primarySet = perTask.filter(complete);
-  const exhausted = drawn.length > 0 && drawn.every((id) => perTask.find((t) => t.task_id === id)?.finished);
-  const counts = { drawn: drawn.length, started: started.length, primary_set: primarySet.length, runs: data.runs.filter((r) => MODEL_ARMS.includes(r.arm)).length, outage_hours: outage.size, out_of_order: perTask.filter((t) => t.out_of_order).length, ...repos };
-  if (!(primarySet.length >= N || exhausted)) return { sealed: true, counts, why: `${primarySet.length} of the registered ${N} tasks in the primary set, and not every drawn task has finished its slots` };
+  const exhausted =
+    drawn.length > 0 && drawn.every((id) => perTask.find((t) => t.task_id === id)?.finished);
+  const counts = {
+    drawn: drawn.length,
+    started: started.length,
+    primary_set: primarySet.length,
+    runs: data.runs.filter((r) => MODEL_ARMS.includes(r.arm)).length,
+    outage_hours: outage.size,
+    out_of_order: perTask.filter((t) => t.out_of_order).length,
+    ...repos,
+  };
+  if (!(primarySet.length >= N || exhausted))
+    return {
+      sealed: true,
+      counts,
+      why: `${primarySet.length} of the registered ${N} tasks in the primary set, and not every drawn task has finished its slots`,
+    };
 
   const nonMarking = audit ? nonMarkingShare(audit) : null;
   const random = rng(seed);
@@ -315,16 +386,26 @@ export function analyze(data, { accepted, audit, seed = "capsid-bench", resample
       // Disjoint: an error stop in an outage hour is held back whatever Capsid recorded.
       const held = runs.filter((r) => outage.has(hourOf(r.finished_at)));
       const rest = runs.filter((r) => !outage.has(hourOf(r.finished_at)));
-      return [arm, { scored: rest.filter((r) => r.status === "scored").length, held_as_outage: held.length }];
-    })
+      return [
+        arm,
+        { scored: rest.filter((r) => r.status === "scored").length, held_as_outage: held.length },
+      ];
+    }),
   );
   const usage = (field) => {
     const rows = perTask.filter(complete);
-    const per = rows.map((t) => {
-      const runsOf = (arm) => (byTaskArm.get(`${t.task_id}\u0000${arm}`) ?? []).filter((r) => analysisStatus(r, outage) === "scored" && Number.isFinite(r[field]));
-      const [rb, rt] = [runsOf("baseline"), runsOf("treatment")];
-      return rb.length && rt.length ? { repo: t.repo, value: mean(rt.map((r) => r[field])) - mean(rb.map((r) => r[field])) } : null;
-    }).filter((x) => x !== null);
+    const per = rows
+      .map((t) => {
+        const runsOf = (arm) =>
+          (byTaskArm.get(`${t.task_id}\u0000${arm}`) ?? []).filter(
+            (r) => analysisStatus(r, outage) === "scored" && Number.isFinite(r[field]),
+          );
+        const [rb, rt] = [runsOf("baseline"), runsOf("treatment")];
+        return rb.length && rt.length
+          ? { repo: t.repo, value: mean(rt.map((r) => r[field])) - mean(rb.map((r) => r[field])) }
+          : null;
+      })
+      .filter((x) => x !== null);
     return per.length ? bootstrap(per, resamples, random) : null;
   };
   return {
@@ -332,17 +413,44 @@ export function analyze(data, { accepted, audit, seed = "capsid-bench", resample
     counts,
     primary: { b, resolution },
     accepted: acceptedSet,
-    primary_set: { tasks: primarySet.length, repositories: new Set(primarySet.map((t) => t.repo)).size },
+    primary_set: {
+      tasks: primarySet.length,
+      repositories: new Set(primarySet.map((t) => t.repo)).size,
+    },
     second_reader: nonMarking,
-    sentence: allowedSentence({ tasks: primarySet.length, repositories: new Set(primarySet.map((t) => t.repo)).size }, b, resolution, nonMarking),
+    sentence: allowedSentence(
+      { tasks: primarySet.length, repositories: new Set(primarySet.map((t) => t.repo)).size },
+      b,
+      resolution,
+      nonMarking,
+    ),
     sensitivity: {
       // The unweighted mean of the within-repository mean differences, same bootstrap.
-      by_repository: { b: bootstrap(differences(perTask, "b"), resamples, random, { byRepository: true }), resolution: bootstrap(differences(perTask, "resolved"), resamples, random, { byRepository: true }) },
-      b: { against_treatment: bootstrap(bounded(perTask, "b", true), resamples, random), for_treatment: bootstrap(bounded(perTask, "b", false), resamples, random) },
-      resolution: { against_treatment: bootstrap(bounded(perTask, "resolved", true), resamples, random), for_treatment: bootstrap(bounded(perTask, "resolved", false), resamples, random) },
-      flagged_out: flaggedSet.size ? { b: interval("b", withoutFlagged), resolution: interval("resolved", withoutFlagged) } : null,
+      by_repository: {
+        b: bootstrap(differences(perTask, "b"), resamples, random, { byRepository: true }),
+        resolution: bootstrap(differences(perTask, "resolved"), resamples, random, {
+          byRepository: true,
+        }),
+      },
+      b: {
+        against_treatment: bootstrap(bounded(perTask, "b", true), resamples, random),
+        for_treatment: bootstrap(bounded(perTask, "b", false), resamples, random),
+      },
+      resolution: {
+        against_treatment: bootstrap(bounded(perTask, "resolved", true), resamples, random),
+        for_treatment: bootstrap(bounded(perTask, "resolved", false), resamples, random),
+      },
+      flagged_out: flaggedSet.size
+        ? { b: interval("b", withoutFlagged), resolution: interval("resolved", withoutFlagged) }
+        : null,
     },
-    secondary: { a: interval("a"), c: interval("c"), turns: usage("turns"), output_tokens: usage("output_tokens"), duration_ms: usage("duration_ms") },
+    secondary: {
+      a: interval("a"),
+      c: interval("c"),
+      turns: usage("turns"),
+      output_tokens: usage("output_tokens"),
+      duration_ms: usage("duration_ms"),
+    },
     error_stops: stops,
   };
 }
@@ -360,11 +468,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(2);
   }
   if (!flag("accepted") || !flag("audit")) {
-    console.error("analyze: --accepted (the frozen accepted-set file) and --audit (the walk's log) are required");
+    console.error(
+      "analyze: --accepted (the frozen accepted-set file) and --audit (the walk's log) are required",
+    );
     process.exit(2);
   }
   const accepted = JSON.parse(readFileSync(flag("accepted"), "utf8"));
-  const audit = readFileSync(flag("audit"), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const audit = readFileSync(flag("audit"), "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
   const flagged = flag("flagged") ? JSON.parse(readFileSync(flag("flagged"), "utf8")) : [];
   const result = analyze(data, { accepted, audit, seed: flag("seed"), resamples, flagged });
   console.log(JSON.stringify(result, null, 2));
