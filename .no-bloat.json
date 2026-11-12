@@ -1,6 +1,6 @@
 {
   "baseline": {
-    "measured_at": "b8684aa",
+    "measured_at": "dff5c1e",
     "knip": {
       "Unused files": 11,
       "Unlisted dependencies": 1,
@@ -10,6 +10,10 @@
       "clones": 4,
       "lines": 27,
       "percentage": 0.19
+    },
+    "shared copies": {
+      "clones": 0,
+      "lines": 0
     },
     "tests": {
       "files": 5,
