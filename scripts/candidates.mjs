@@ -17,9 +17,9 @@
 // Each filter's count, and each repository left out with its reason, go into the file.
 // A rerun after a fix keeps the same freeze date: the date is chosen once.
 
-import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
+import { sha256 } from "./seal.mjs";
 
 export const ISSUE_CUTOFF = "2026-06-30T23:59:59Z"; // scripts/task.mjs CUTOFF
 export const MERGED_AFTER = "2026-07-01T23:59:59Z";
@@ -336,7 +336,7 @@ async function main() {
   const file = {
     dataset: repoList.dataset,
     dataset_commit: repoList.commit,
-    repo_list_sha256: createHash("sha256").update(text).digest("hex"),
+    repo_list_sha256: sha256(text),
     script_commit: process.env.GITHUB_SHA ?? null,
     issue_cutoff: ISSUE_CUTOFF,
     merged_after: MERGED_AFTER,
@@ -355,7 +355,7 @@ async function main() {
     `- ${built.pull_requests.searched} merged pull requests found`,
     ...PR_STEPS.map((s) => `  - ${s}: ${built.pull_requests.kept_after[s]}`),
     "",
-    `${built.candidates.length} candidates. File sha256 ${createHash("sha256").update(json).digest("hex")}.`,
+    `${built.candidates.length} candidates. File sha256 ${sha256(json)}.`,
   ];
   console.log(lines.join("\n"));
 }
