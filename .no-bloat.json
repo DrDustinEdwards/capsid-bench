@@ -1,15 +1,16 @@
 {
   "baseline": {
-    "measured_at": "dff5c1e",
+    "measured_at": "08268ee",
     "knip": {
-      "Unused files": 11,
-      "Unlisted dependencies": 1,
-      "Unused exports": 1
+      "files": 11,
+      "unlisted": 2,
+      "exports": 1
     },
     "jscpd": {
       "clones": 4,
       "lines": 27,
-      "percentage": 0.19
+      "percentage": 0.19,
+      "unread": 0
     },
     "shared copies": {
       "clones": 0,
@@ -20,9 +21,9 @@
       "cases": 50
     },
     "comments": {
-      "lines": 512,
-      "code": 4142,
-      "percentage": 11
+      "lines": 519,
+      "code": 4152,
+      "percentage": 11.11
     }
   }
 }
