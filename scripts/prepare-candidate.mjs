@@ -24,33 +24,26 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { isTestPath } from "./candidates.mjs";
+import { githubHeaders, rateLimitedOrDown, retryingFetch } from "./net.mjs";
 
 export const BASE_NOT_FOUND = "base commit not found";
 
 const API = "https://api.github.com";
 
 export function github(token, fetchImpl = fetch) {
-  const headers = {
-    Authorization: `bearer ${token}`,
-    "User-Agent": "capsid-bench-prepare",
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
+  const headers = githubHeaders(token, "capsid-bench-prepare");
   const call = async (path, accept = "application/vnd.github+json", init = {}) => {
-    for (let attempt = 0; ; attempt++) {
-      const response = await fetchImpl(`${API}${path}`, {
-        ...init,
-        headers: { ...headers, Accept: accept, ...init.headers },
-      });
-      if (
-        (response.status === 403 || response.status === 429 || response.status >= 500) &&
-        attempt < 6
-      ) {
-        await new Promise((r) => setTimeout(r, 5000 * 2 ** attempt));
-        continue;
-      }
-      if (!response.ok) throw new Error(`GitHub ${path} answered ${response.status}`);
-      return accept.endsWith("diff") ? response.text() : response.json();
-    }
+    const response = await retryingFetch(
+      fetchImpl,
+      `${API}${path}`,
+      { ...init, headers: { ...headers, Accept: accept, ...init.headers } },
+      {
+        attempts: 6,
+        delay: (r, attempt) => (rateLimitedOrDown(r.status) ? 5000 * 2 ** attempt : null),
+      },
+    );
+    if (!response.ok) throw new Error(`GitHub ${path} answered ${response.status}`);
+    return accept.endsWith("diff") ? response.text() : response.json();
   };
   return {
     rest: (path) => call(path),

@@ -48,6 +48,7 @@ import {
   leakage,
   prepare,
 } from "./prepare-candidate.mjs";
+import { githubHeaders, retryingFetch } from "./net.mjs";
 import { sha256 } from "./seal.mjs";
 
 // The frozen frame (run 39487118514, frame/candidates.json). The walk refuses any other.
@@ -211,32 +212,27 @@ export function secondReaderConfig(env, promptText) {
 // One call, temperature 0. A transport failure (no response, 429 or 5xx) may be retried;
 // a completed response is the decision and is never rerun.
 async function askSecondReader(config, prompt, key, fetchImpl = fetch) {
-  for (let attempt = 0; ; attempt++) {
-    let response;
-    try {
-      response = await fetchImpl(config.url, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: config.model,
-          temperature: 0,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-    } catch (err) {
-      if (attempt < 5) {
-        await new Promise((r) => setTimeout(r, 5000 * 2 ** attempt));
-        continue;
-      }
-      throw err;
-    }
-    if ((response.status === 429 || response.status >= 500) && attempt < 5) {
-      await new Promise((r) => setTimeout(r, 5000 * 2 ** attempt));
-      continue;
-    }
-    if (!response.ok) throw new Error(`the second reader answered ${response.status}`);
-    return response.text();
-  }
+  const response = await retryingFetch(
+    fetchImpl,
+    config.url,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: config.model,
+        temperature: 0,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    },
+    {
+      attempts: 5,
+      baseMs: 5000,
+      retryThrown: true,
+      delay: (r, attempt) => (r.status === 429 || r.status >= 500 ? 5000 * 2 ** attempt : null),
+    },
+  );
+  if (!response.ok) throw new Error(`the second reader answered ${response.status}`);
+  return response.text();
 }
 
 // A reader's comment: `in`, or `out <code>` followed by the quoted reason.
@@ -313,10 +309,7 @@ async function namesInBase(repo, base, names) {
   if (!names.length) return new Set();
   const work = mkdtempSync(join(tmpdir(), "base-"));
   const response = await fetch(`https://api.github.com/repos/${repo}/tarball/${base}`, {
-    headers: {
-      Authorization: `bearer ${process.env.GITHUB_TOKEN}`,
-      "User-Agent": "capsid-bench-walk",
-    },
+    headers: githubHeaders(process.env.GITHUB_TOKEN, "capsid-bench-walk"),
   });
   if (!response.ok)
     throw new Error(`the archive of ${repo} at ${base} answered ${response.status}`);
@@ -568,10 +561,8 @@ async function createIssue(repo, title, body) {
   const response = await fetch(`https://api.github.com/repos/${repo}/issues`, {
     method: "POST",
     headers: {
-      Authorization: `bearer ${process.env.GITHUB_TOKEN}`,
+      ...githubHeaders(process.env.GITHUB_TOKEN, "capsid-bench-walk"),
       Accept: "application/vnd.github+json",
-      "User-Agent": "capsid-bench-walk",
-      "X-GitHub-Api-Version": "2022-11-28",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ title, body }),

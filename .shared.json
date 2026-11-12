@@ -1,4 +1,7 @@
 {
+  "copies": {
+    "scripts/net.mjs": "githubHeaders: the harness scripts are plain Node with no packages (CLAUDE.md); only seal, unseal and seed load tools/, so site-runtime is not a dependency here"
+  },
   "apps": {
     ".": "package"
   },
