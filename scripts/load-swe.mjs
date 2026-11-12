@@ -18,6 +18,7 @@
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { retryingFetch } from "./net.mjs";
 import { checkTask, CUTOFF } from "./task.mjs";
 
 // SWE-bench stores the two test lists as JSON text; some exports store real arrays.
@@ -71,15 +72,12 @@ export function candidates(rowList) {
 
 // datasets-server answers 429 when paged quickly; wait and retry rather than fail.
 async function getJson(url) {
-  for (let attempt = 0; ; attempt++) {
-    const response = await fetch(url);
-    if (response.status === 429 && attempt < 6) {
-      await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
-      continue;
-    }
-    if (!response.ok) throw new Error(`${url} answered ${response.status}`);
-    return response.json();
-  }
+  const response = await retryingFetch(fetch, url, undefined, {
+    attempts: 6,
+    delay: (r, attempt) => (r.status === 429 ? 2000 * 2 ** attempt : null),
+  });
+  if (!response.ok) throw new Error(`${url} answered ${response.status}`);
+  return response.json();
 }
 
 // Every row, or with `where` only the rows that match (datasets-server's /filter), so a

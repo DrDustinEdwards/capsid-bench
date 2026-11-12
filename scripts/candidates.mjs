@@ -19,6 +19,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
+import { githubHeaders, rateLimitedOrDown, retryingFetch, sleep } from "./net.mjs";
 import { sha256 } from "./seal.mjs";
 
 export const ISSUE_CUTOFF = "2026-06-30T23:59:59Z"; // scripts/task.mjs CUTOFF
@@ -118,43 +119,40 @@ export function searchBatches(repos, rest) {
   return batches;
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 // One GraphQL call, waiting out the hourly limit and GitHub's secondary limits.
 export function client(token, fetchImpl = fetch, wait = sleep) {
+  const headers = {
+    ...githubHeaders(token, "capsid-bench-candidates"),
+    "Content-Type": "application/json",
+  };
+  const rateLimited = async (response) =>
+    response.ok &&
+    ((await response.clone().json()).errors ?? []).some((e) => e.type === "RATE_LIMITED");
   return async function graphql(query, variables = {}) {
-    for (let attempt = 0; ; attempt++) {
-      const response = await fetchImpl("https://api.github.com/graphql", {
-        method: "POST",
-        headers: {
-          Authorization: `bearer ${token}`,
-          "Content-Type": "application/json",
-          "User-Agent": "capsid-bench-candidates",
+    const response = await retryingFetch(
+      fetchImpl,
+      "https://api.github.com/graphql",
+      { method: "POST", headers, body: JSON.stringify({ query, variables }) },
+      {
+        attempts: 8,
+        wait,
+        delay: async (r, attempt) => {
+          if (rateLimitedOrDown(r.status)) {
+            const after = Number(r.headers.get("retry-after")) || 0;
+            return Math.max(after * 1000, 5000 * 2 ** attempt);
+          }
+          return (await rateLimited(r)) ? 60000 * (attempt + 1) : null;
         },
-        body: JSON.stringify({ query, variables }),
-      });
-      if (
-        (response.status === 403 || response.status === 429 || response.status >= 500) &&
-        attempt < 8
-      ) {
-        const after = Number(response.headers.get("retry-after")) || 0;
-        await wait(Math.max(after * 1000, 5000 * 2 ** attempt));
-        continue;
-      }
-      if (!response.ok) throw new Error(`GitHub GraphQL answered ${response.status}`);
-      const body = await response.json();
-      const fatal = (body.errors ?? []).filter((e) => e.type !== "NOT_FOUND");
-      if (fatal.some((e) => e.type === "RATE_LIMITED") && attempt < 8) {
-        await wait(60000 * (attempt + 1));
-        continue;
-      }
-      if (fatal.length)
-        throw new Error(`GitHub GraphQL: ${fatal.map((e) => e.message).join("; ")}`);
-      const limit = body.data?.rateLimit;
-      if (limit && limit.remaining < 50)
-        await wait(Math.max(0, Date.parse(limit.resetAt) - Date.now()) + 5000);
-      return body.data;
-    }
+      },
+    );
+    if (!response.ok) throw new Error(`GitHub GraphQL answered ${response.status}`);
+    const body = await response.json();
+    const fatal = (body.errors ?? []).filter((e) => e.type !== "NOT_FOUND");
+    if (fatal.length) throw new Error(`GitHub GraphQL: ${fatal.map((e) => e.message).join("; ")}`);
+    const limit = body.data?.rateLimit;
+    if (limit && limit.remaining < 50)
+      await wait(Math.max(0, Date.parse(limit.resetAt) - Date.now()) + 5000);
+    return body.data;
   };
 }
 
