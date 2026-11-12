@@ -28,7 +28,6 @@
 // identifier, and the SHA-256 of prompts/second-reader.md. SECOND_READER_URL,
 // SECOND_READER_MODEL and SECOND_READER_KEY name it; a change after the start is refused.
 
-import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
@@ -49,6 +48,7 @@ import {
   leakage,
   prepare,
 } from "./prepare-candidate.mjs";
+import { sha256 } from "./seal.mjs";
 
 // The frozen frame (run 39487118514, frame/candidates.json). The walk refuses any other.
 export const FRAME_SHA256 = "68cbf6d39d73a3730e13aad43b2bfcb54df72cfaff2cee1a6e44930c567f006e";
@@ -197,7 +197,7 @@ export function secondReaderConfig(env, promptText) {
   const config = {
     url: env.SECOND_READER_URL ?? "",
     model: env.SECOND_READER_MODEL ?? "",
-    prompt_sha256: createHash("sha256").update(promptText).digest("hex"),
+    prompt_sha256: sha256(promptText),
   };
   if (!config.url.startsWith("https://") || !config.model)
     throw new Error(
@@ -252,8 +252,6 @@ export function parseDecision(text) {
   return { decision, reason, quote };
 }
 
-const sha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
-
 // A fence longer than any run of backticks in the text, so nothing inside renders: no
 // mention, no cross-reference to another repository, no markup.
 export function fenced(text, lang = "") {
@@ -304,7 +302,8 @@ function append(dir, record) {
 }
 
 function loadFrame(path) {
-  if (sha256(path) !== FRAME_SHA256) throw new Error(`${path} is not the frozen frame`);
+  if (sha256(readFileSync(path)) !== FRAME_SHA256)
+    throw new Error(`${path} is not the frozen frame`);
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
@@ -375,7 +374,7 @@ async function gates(dir, candidate, recipe, position) {
   const { patch, ...rest } = instance;
   const task = {
     ...rest,
-    patch_sha256: createHash("sha256").update(patch).digest("hex"),
+    patch_sha256: sha256(patch),
     FAIL_TO_PASS: result.FAIL_TO_PASS,
     PASS_TO_PASS: result.PASS_TO_PASS,
   };
@@ -506,7 +505,7 @@ async function main() {
         task_id: next.task_id,
         ...parsed,
         raw,
-        raw_sha256: createHash("sha256").update(raw).digest("hex"),
+        raw_sha256: sha256(raw),
         model: config.model,
         prompt_sha256: config.prompt_sha256,
       });
