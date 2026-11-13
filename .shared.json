@@ -7,13 +7,7 @@
     ".": "package"
   },
   "spelling": {
-    "ignore": [
-      "licence"
-    ],
-    "skip": [
-      "frame/**",
-      "tasks/**",
-      "prompts/**"
-    ]
+    "ignore": ["licence"],
+    "skip": ["frame/**", "tasks/**", "prompts/**"]
   }
 }
