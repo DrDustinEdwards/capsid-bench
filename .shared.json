@@ -1,13 +1,19 @@
 {
   "copies": {
-    "scripts/net.mjs": "githubHeaders: the harness scripts are plain Node with no packages (CLAUDE.md); only seal, unseal and seed load tools/, so site-runtime is not a dependency here",
-    "scripts/seal.mjs": "sha256: the harness scripts are plain Node with no packages (CLAUDE.md), and most workflows that run them install nothing; site-runtime is not a dependency here"
+    "scripts/net.mjs": "githubHeaders: the harness scripts run in workflows that install nothing, so site-runtime is not a dependency here",
+    "scripts/seed.mjs": "sha256: the one hash every harness script imports; most workflows that run them install nothing, so site-runtime is not a dependency here"
   },
   "apps": {
     ".": "package"
   },
   "spelling": {
-    "ignore": ["licence"],
-    "skip": ["frame/**", "tasks/**", "prompts/**"]
+    "ignore": [
+      "licence"
+    ],
+    "skip": [
+      "frame/**",
+      "tasks/**",
+      "prompts/**"
+    ]
   }
 }
