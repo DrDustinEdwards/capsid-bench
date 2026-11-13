@@ -10,9 +10,9 @@
 //
 // Needs @noble/curves (locked in tools/package-lock.json); NOBLE_BLS names its bls12-381.js file.
 
-import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
+import { sha256 } from "./seal.mjs";
 
 export const QUICKNET = {
   chain_hash: "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
@@ -34,19 +34,17 @@ export function roundAt(t) {
 }
 export const roundTime = (round) => QUICKNET.genesis_time + (round - 1) * QUICKNET.period;
 
-const sha256 = (bytes) => createHash("sha256").update(bytes).digest();
-
 // The 8-byte big-endian round number; quicknet signs its SHA-256.
 export function roundMessage(round) {
   const bytes = Buffer.alloc(8);
   bytes.writeBigUInt64BE(BigInt(round));
-  return sha256(bytes);
+  return Buffer.from(sha256(bytes), "hex");
 }
 
 export function verifyBeacon(beacon, round, bls, publicKey = QUICKNET.public_key) {
   if (beacon.round !== round) throw new Error(`drand returned round ${beacon.round}, not ${round}`);
   const signature = Uint8Array.from(Buffer.from(beacon.signature, "hex"));
-  if (sha256(signature).toString("hex") !== beacon.randomness)
+  if (sha256(signature) !== beacon.randomness)
     throw new Error("the randomness is not the SHA-256 of the signature");
   const sigs = bls.shortSignatures;
   const ok = sigs.verify(
