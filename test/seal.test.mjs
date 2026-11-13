@@ -9,13 +9,12 @@ import {
   redact,
   refusal,
   sealRound,
-  sha256,
   transitKey,
   unlock,
   unpackFiles,
 } from "../scripts/seal.mjs";
 import { checkSealed, lockedRound, outcomeOf } from "../scripts/unseal.mjs";
-import { roundTime } from "../scripts/seed.mjs";
+import { roundTime, sha256 } from "../scripts/seed.mjs";
 
 // A real tlock ciphertext of "hi", locked to quicknet round 30000000.
 const ARMORED = `-----BEGIN AGE ENCRYPTED FILE-----

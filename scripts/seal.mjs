@@ -25,14 +25,12 @@
 // Needs tlock-js and sigstore (locked in tools/package-lock.json); SEAL_MODULES names the
 // node_modules directory they are installed in.
 
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { roundAt, roundTime } from "./seed.mjs";
-
-export const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+import { roundAt, roundTime, sha256 } from "./seed.mjs";
 
 export function transitKey(benchKey, runId) {
   if (!benchKey || !runId) throw new Error("the transit key needs BENCH_KEY and the run id");

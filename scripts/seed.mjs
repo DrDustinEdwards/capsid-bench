@@ -10,9 +10,9 @@
 //
 // Needs @noble/curves (locked in tools/package-lock.json); NOBLE_BLS names its bls12-381.js file.
 
+import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
-import { sha256 } from "./seal.mjs";
 
 export const QUICKNET = {
   chain_hash: "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
@@ -33,6 +33,8 @@ export function roundAt(t) {
   return Math.floor((seconds - QUICKNET.genesis_time) / QUICKNET.period) + 1;
 }
 export const roundTime = (round) => QUICKNET.genesis_time + (round - 1) * QUICKNET.period;
+
+export const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 // The 8-byte big-endian round number; quicknet signs its SHA-256.
 export function roundMessage(round) {
