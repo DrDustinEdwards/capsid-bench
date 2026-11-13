@@ -20,7 +20,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { githubHeaders, rateLimitedOrDown, retryingFetch, sleep } from "./net.mjs";
-import { sha256 } from "./seal.mjs";
+import { sha256 } from "./seed.mjs";
 
 export const ISSUE_CUTOFF = "2026-06-30T23:59:59Z"; // scripts/task.mjs CUTOFF
 export const MERGED_AFTER = "2026-07-01T23:59:59Z";

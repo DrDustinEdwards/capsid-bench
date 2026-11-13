@@ -49,7 +49,7 @@ import {
   prepare,
 } from "./prepare-candidate.mjs";
 import { githubHeaders, retryingFetch } from "./net.mjs";
-import { sha256 } from "./seal.mjs";
+import { sha256 } from "./seed.mjs";
 
 // The frozen frame (run 39487118514, frame/candidates.json). The walk refuses any other.
 export const FRAME_SHA256 = "68cbf6d39d73a3730e13aad43b2bfcb54df72cfaff2cee1a6e44930c567f006e";
