@@ -60,7 +60,7 @@ jobs:
               '{dataset: $dataset, commit: $commit, files: [split("\n")[] | select(length > 0) | capture("^(?<sha256>[0-9a-f]+)  (?<path>.+)$")]}' > "${RUNNER_TEMP}/manifest.json"
           python3 scripts/repos.py "${D}" "${RUNNER_TEMP}/manifest.json" "${RUNNER_TEMP}/repos.json" | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frame-repos
           retention-days: 90
@@ -94,7 +94,7 @@ jobs:
           set -euo pipefail
           node scripts/candidates.mjs --repos "${RUNNER_TEMP}/repos.json" --freeze "${FREEZE}" --out "${RUNNER_TEMP}/candidates.json" | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frame-candidates-list
           retention-days: 90
