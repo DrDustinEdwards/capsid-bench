@@ -10,10 +10,10 @@
     "lint": "oxlint --type-aware --deny-warnings --report-unused-disable-directives-severity=error"
   },
   "devDependencies": {
-    "@dustinedwards/devkit": "github:DrDustinEdwards/devkit#v0.51.2",
-    "oxfmt": "0.77.0",
-    "oxlint": "1.92.0",
-    "oxlint-tsgolint": "7.0.2006"
+    "@dustinedwards/devkit": "github:DrDustinEdwards/devkit#v0.52.0",
+    "oxfmt": "0.78.0",
+    "oxlint": "1.93.0",
+    "oxlint-tsgolint": "7.0.2007"
   },
   "engines": {
     "node": ">=26.11.1"
