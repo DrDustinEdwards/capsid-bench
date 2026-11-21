@@ -33,7 +33,7 @@ jobs:
       pull-requests: write
       id-token: write
       checks: write
-    uses: DrDustinEdwards/devkit/.github/workflows/pr.yml@d44675809ea4be692d8c24225337386e257956b2 # v0.55.1
+    uses: DrDustinEdwards/devkit/.github/workflows/pr.yml@99727d0444f5d17e34dbb31eff915afe70da67aa # v0.55.6
     with:
       review: true
       # The root install is the lint tooling and devkit, as in ci.yml; no-bloat counts against .no-bloat.json.
