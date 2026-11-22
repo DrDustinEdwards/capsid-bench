@@ -19,4 +19,4 @@ concurrency:
 
 jobs:
   dependencies:
-    uses: DrDustinEdwards/devkit/.github/workflows/dependencies.yml@56ee28ee00f613b77643071d4187d998bad5e55e # v0.58.0
+    uses: DrDustinEdwards/devkit/.github/workflows/dependencies.yml@4df16102375793913cc79b6083178528decc6617 # v0.59.0
