@@ -1,6 +1,6 @@
 {
   "baseline": {
-    "measured_at": "718f0a4",
+    "measured_at": "39ba171",
     "knip": {
       "files": 11,
       "unlisted": 2,
@@ -17,14 +17,17 @@
       "lines": 0
     },
     "legacy": {},
+    "size": {
+      "scripts/walk.mjs": 579
+    },
     "tests": {
       "files": 5,
       "cases": 50
     },
     "comments": {
       "lines": 519,
-      "code": 4152,
-      "percentage": 11.11
+      "code": 4150,
+      "percentage": 11.12
     }
   }
 }
