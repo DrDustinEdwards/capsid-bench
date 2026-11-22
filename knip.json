@@ -1,5 +1,0 @@
-{
-  "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
-  // scripts/*.mjs are run by hand and by the workflows (`node scripts/<name>.mjs`, or a docker run), and test/*.test.mjs by `node --test test/` (CI's test job); nothing imports them.
-  "entry": ["scripts/*.mjs", "test/*.test.mjs"],
-}
