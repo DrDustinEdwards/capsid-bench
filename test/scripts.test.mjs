@@ -295,7 +295,7 @@ test("the analysis labels a run from its claim and counts, and never from a stor
 });
 
 test("the analysis replays slots as Capsid fills them and holds back an outage hour's error stops", async () => {
-  const { analysisStatus, outageHours, slots } = await import("../scripts/analyze.mjs");
+  const { analysisStatus, outageHoursOf, slots } = await import("../scripts/analyze.mjs");
   const r = (status, at, stopped = false) => ({
     arm: "baseline",
     status,
@@ -303,7 +303,7 @@ test("the analysis replays slots as Capsid fills them and holds back an outage h
     finished_at: at,
     report: JSON.stringify({ stopped_on_error: stopped }),
   });
-  const outage = outageHours([
+  const outage = outageHoursOf([
     r("unjudged", "2026-11-01T05:01:00Z", true),
     r("unjudged", "2026-11-01T05:02:00Z", true),
     r("scored", "2026-11-01T05:03:00Z"),
