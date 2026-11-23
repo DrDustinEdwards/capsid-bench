@@ -48,7 +48,7 @@ const hourOf = (iso) => (typeof iso === "string" ? iso.slice(0, 13) : null);
 
 // Capsid's outage rule (src/bench.ts isOutageHour): a UTC hour in which at least four
 // model runs ended and at least half of them stopped with error_during_execution.
-export function outageHours(runs) {
+export function outageHoursOf(runs) {
   const hours = new Map();
   for (const run of runs) {
     if (!MODEL_ARMS.includes(run.arm) || !run.finished_at) continue;
@@ -321,7 +321,7 @@ export function analyze(
     throw new Error(
       `run ${unopened.id} is still sealed: open the export with scripts/unseal.mjs first`,
     );
-  const outage = outageHours(data.runs);
+  const outage = outageHoursOf(data.runs);
   const byTaskArm = new Map();
   for (const run of [...data.runs].sort((x, y) =>
     x.started_at < y.started_at ? -1 : x.started_at > y.started_at ? 1 : 0,
