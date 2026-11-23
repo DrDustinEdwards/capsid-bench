@@ -44,7 +44,7 @@ export function checkTask(task) {
     if (!str(field)) problems.push(`${field} must be a non-empty string`);
   }
   // These reach GITHUB_OUTPUT one per line, so a line break would write another output.
-  for (const field of ["repo", "base_commit", "image", "setup"]) {
+  for (const field of ["repo", "base_commit", "image"]) {
     if (typeof task[field] === "string" && /[\r\n]/.test(task[field]))
       problems.push(`${field} may not hold a line break (it is written to GITHUB_OUTPUT)`);
   }

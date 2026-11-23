@@ -42,8 +42,11 @@ def parse(diff):
         lines = part.split("\n")
         if lines and lines[-1] == "":
             lines.pop()
-        m = re.match(r"diff --git a/(\S+) b/(\S+)", lines[0])
-        f = {"path": m.group(2) if m else "", "head": [], "hunks": [], "new": False}
+        header = lines[0][len("diff --git "):]
+        rename = next((l[len("rename to "):] for l in lines if l.startswith("rename to ")), None)
+        half = (len(header) - 5) // 2
+        path = rename or (header[half + 5:] if len(header) % 2 == 1 else "")
+        f = {"path": path, "head": [], "hunks": [], "new": False}
         for line in lines:
             if line.startswith("@@"):
                 f["hunks"].append([line])

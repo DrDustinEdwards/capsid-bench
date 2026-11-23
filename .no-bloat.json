@@ -14,14 +14,14 @@
     },
     "legacy": {},
     "size": {
-      "scripts/walk.mjs": 579
+      "scripts/walk.mjs": 573
     },
     "tests": {
       "files": 5,
       "cases": 50
     },
     "comments": {
-      "lines": 519,
+      "lines": 516,
       "code": 4150,
       "percentage": 11.12
     }

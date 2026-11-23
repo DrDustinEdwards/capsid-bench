@@ -1,5 +1,8 @@
-// The two things every script that calls GitHub or another API repeats: the request headers
-// and the retry with backoff. Plain Node, no packages (CLAUDE.md: scripts carry none).
+// The things scripts repeat: the request headers, the retry with backoff, and a scratch
+// directory. Plain Node, no packages (CLAUDE.md: scripts carry none).
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -36,5 +39,15 @@ export async function retryingFetch(
     const ms = attempt < attempts ? await delay(response, attempt) : null;
     if (ms == null) return response;
     await wait(ms);
+  }
+}
+
+// A scratch directory that is removed when `fn` finishes: a long walk runs many steps in one job.
+export async function withTemp(prefix, fn) {
+  const work = mkdtempSync(join(tmpdir(), prefix));
+  try {
+    return await fn(work);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
   }
 }

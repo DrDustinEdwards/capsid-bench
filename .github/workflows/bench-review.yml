@@ -28,6 +28,7 @@ env:
   REVIEW_TURNS: 40
   REVIEW_MINUTES: 20
   CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
+  CLAUDE_INSTALL_SHA256: ${{ vars.CLAUDE_INSTALL_SHA256 }}
   NODE_IMAGE: node:26.11.1-bookworm@sha256:f1233c415b41ffcf237c717b3dea92e9d4ea006e0e4c71edcb790605d74f5404
 
 jobs:
@@ -87,7 +88,10 @@ jobs:
         id: claude
         run: |
           set -euo pipefail
-          curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_CODE_VERSION}"
+          [ -n "${CLAUDE_INSTALL_SHA256}" ] || { echo "set the repo variable CLAUDE_INSTALL_SHA256 (pinned at registration)" >&2; exit 1; }
+          curl -fsSL -o "${RUNNER_TEMP}/claude-install.sh" https://claude.ai/install.sh
+          echo "${CLAUDE_INSTALL_SHA256}  ${RUNNER_TEMP}/claude-install.sh" | sha256sum -c -
+          bash "${RUNNER_TEMP}/claude-install.sh" "${CLAUDE_CODE_VERSION}"
           echo "bin=$(readlink -f "${HOME}/.local/bin/claude")" >> "$GITHUB_OUTPUT"
 
       - name: Start the egress proxy and the task container, with the fix applied

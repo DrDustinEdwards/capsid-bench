@@ -61,10 +61,22 @@ export function github(token, fetchImpl = fetch) {
   };
 }
 
+// The new path of one file's diff. A rename names it; otherwise the two paths are equal, so
+// the header splits down the middle, which holds for spaces and for git's quoted names.
+export function diffPath(text) {
+  const rename = text.match(/^rename to (.+)$/m);
+  if (rename) return rename[1];
+  const header = text.split("\n", 1)[0].slice("diff --git ".length);
+  const quoted = header.match(/^"a\/(.*)" "b\/(.*)"$/);
+  if (quoted) return quoted[2];
+  const half = (header.length - 5) / 2;
+  return Number.isInteger(half) ? header.slice(half + 5) : "";
+}
+
 // A unified diff split into its per-file parts, keyed by path.
 export function splitDiff(diff) {
   const parts = diff.split(/^(?=diff --git )/m).filter((p) => p.startsWith("diff --git "));
-  return parts.map((text) => ({ path: text.match(/^diff --git a\/(\S+) b\/(\S+)/)[2], text }));
+  return parts.map((text) => ({ path: diffPath(text), text }));
 }
 
 const sameFiles = (a, b) =>

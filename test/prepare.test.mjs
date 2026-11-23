@@ -28,6 +28,16 @@ test("a diff splits into its files", () => {
   assert.equal(parts.map((p) => p.text).join(""), DIFF);
 });
 
+test("a path with a space or a rename splits too", () => {
+  const spaced = "diff --git a/tests/x y.md b/tests/x y.md\n+a\n";
+  const renamed =
+    "diff --git a/old.py b/new.py\nsimilarity index 90%\nrename from old.py\nrename to new.py\n";
+  assert.deepEqual(
+    splitDiff(spaced + renamed).map((p) => p.path),
+    ["tests/x y.md", "new.py"],
+  );
+});
+
 const candidate = (over = {}) => ({
   merge_commit: "m",
   merge_parents: ["p"],

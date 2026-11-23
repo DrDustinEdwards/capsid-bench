@@ -118,7 +118,6 @@ function scoreBenchmark(task, diff, work) {
     ],
     { cwd: work },
   );
-  process.stderr.write(harness.out.slice(-4000));
   const reportPath = join(
     work,
     "logs",

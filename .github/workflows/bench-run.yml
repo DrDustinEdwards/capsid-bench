@@ -62,6 +62,7 @@ env:
   # default for Sonnet 5.5 is medium and the API's is high, so a blank would be ambiguous.
   EFFORT: high
   CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
+  CLAUDE_INSTALL_SHA256: ${{ vars.CLAUDE_INSTALL_SHA256 }}
   # The same harness commit bench-walk.yml and bench-validate.yml install, so validation
   # and scoring run one harness, fixed by this workflow's commit (which the seal checks).
   HARNESS: git+https://github.com/SWE-rebench/SWE-bench-fork@e4907b7a90eafaa1f0a6428fd04fe31cdd8b4284
@@ -161,7 +162,10 @@ jobs:
         if: inputs.arm == 'baseline' || inputs.arm == 'treatment'
         run: |
           set -euo pipefail
-          curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_CODE_VERSION}"
+          [ -n "${CLAUDE_INSTALL_SHA256}" ] || { echo "set the repo variable CLAUDE_INSTALL_SHA256 (pinned at registration)" >&2; exit 1; }
+          curl -fsSL -o "${RUNNER_TEMP}/claude-install.sh" https://claude.ai/install.sh
+          echo "${CLAUDE_INSTALL_SHA256}  ${RUNNER_TEMP}/claude-install.sh" | sha256sum -c -
+          bash "${RUNNER_TEMP}/claude-install.sh" "${CLAUDE_CODE_VERSION}"
           BIN=$(readlink -f "${HOME}/.local/bin/claude")
           echo "bin=${BIN}" >> "$GITHUB_OUTPUT"
           echo "version=$("${BIN}" --version | head -1)" >> "$GITHUB_OUTPUT"

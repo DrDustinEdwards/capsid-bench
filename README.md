@@ -27,7 +27,7 @@ A run Capsid cannot judge (the machine failed, a hidden test did not run, Claude
 
 - Secrets: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`, Dustin's subscription), `BENCH_KEY` (a fresh random value, set at the same time as Capsid's `BENCH_SECRET`; the commands are in capsid's docs/bench.md), `BENCH_DRIVER_KEY` (a Capsid driver key for the `bench` namespace, no flags, narrowed to posting: tools `capsid_work_jobs` and `capsid_work_jobs.post`).
 - Never set `ANTHROPIC_API_KEY` here: it would win over the token and bill the Console account. The run refuses to start if it is set.
-- Variables: `CLAUDE_CODE_VERSION` and `SEAL_T` (T_seal, a UTC instant after the last run), all fixed at pre-registration.
+- Variables: `CLAUDE_CODE_VERSION`, `CLAUDE_INSTALL_SHA256` (the SHA-256 of the installer script at claude.ai/install.sh, which the workflows check before running it) and `SEAL_T` (T_seal, a UTC instant after the last run), all fixed at pre-registration.
 - In Capsid: migrations 0047 and 0049 applied, the `bench` namespace created, and KV `bench:enabled` set to `on` only while runs are wanted.
 
 ## Tasks
