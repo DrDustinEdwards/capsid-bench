@@ -44,8 +44,9 @@ def parse(diff):
             lines.pop()
         header = lines[0][len("diff --git "):]
         rename = next((l[len("rename to "):] for l in lines if l.startswith("rename to ")), None)
+        quoted = re.match(r'^"a/(.*)" "b/(.*)"$', header)
         half = (len(header) - 5) // 2
-        path = rename or (header[half + 5:] if len(header) % 2 == 1 else "")
+        path = rename or (quoted.group(2) if quoted else header[half + 5:] if len(header) % 2 == 1 else "")
         f = {"path": path, "head": [], "hunks": [], "new": False}
         for line in lines:
             if line.startswith("@@"):
