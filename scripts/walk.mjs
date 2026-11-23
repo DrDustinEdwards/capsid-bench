@@ -29,15 +29,7 @@
 // SECOND_READER_MODEL and SECOND_READER_KEY name it; a change after the start is refused.
 
 import { spawnSync } from "node:child_process";
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { N, REPO_CAP, rng } from "./analyze.mjs";
@@ -48,7 +40,7 @@ import {
   leakage,
   prepare,
 } from "./prepare-candidate.mjs";
-import { githubHeaders, retryingFetch } from "./net.mjs";
+import { githubHeaders, retryingFetch, withTemp } from "./net.mjs";
 import { sha256 } from "./seed.mjs";
 
 // The frozen frame (run 39487118514, frame/candidates.json). The walk refuses any other.
@@ -307,25 +299,26 @@ function loadFrame(path) {
 // one archive download and one grep over it.
 async function namesInBase(repo, base, names) {
   if (!names.length) return new Set();
-  const work = mkdtempSync(join(tmpdir(), "base-"));
-  const response = await fetch(`https://api.github.com/repos/${repo}/tarball/${base}`, {
-    headers: githubHeaders(process.env.GITHUB_TOKEN, "capsid-bench-walk"),
+  return withTemp("base-", async (work) => {
+    const response = await fetch(`https://api.github.com/repos/${repo}/tarball/${base}`, {
+      headers: githubHeaders(process.env.GITHUB_TOKEN, "capsid-bench-walk"),
+    });
+    if (!response.ok)
+      throw new Error(`the archive of ${repo} at ${base} answered ${response.status}`);
+    writeFileSync(join(work, "base.tar.gz"), Buffer.from(await response.arrayBuffer()));
+    mkdirSync(join(work, "tree"));
+    const tar = spawnSync("tar", ["xzf", join(work, "base.tar.gz"), "-C", join(work, "tree")], {
+      stdio: "inherit",
+    });
+    if (tar.status !== 0) throw new Error(`tar exited ${tar.status}`);
+    writeFileSync(join(work, "names.txt"), `${names.join("\n")}\n`);
+    const grep = spawnSync("grep", ["-rhowIF", "-f", join(work, "names.txt"), join(work, "tree")], {
+      encoding: "utf8",
+      maxBuffer: 1 << 30,
+    });
+    if (grep.status > 1) throw new Error(`grep exited ${grep.status}`);
+    return new Set(grep.stdout.split("\n").filter(Boolean));
   });
-  if (!response.ok)
-    throw new Error(`the archive of ${repo} at ${base} answered ${response.status}`);
-  writeFileSync(join(work, "base.tar.gz"), Buffer.from(await response.arrayBuffer()));
-  mkdirSync(join(work, "tree"));
-  const tar = spawnSync("tar", ["xzf", join(work, "base.tar.gz"), "-C", join(work, "tree")], {
-    stdio: "inherit",
-  });
-  if (tar.status !== 0) throw new Error(`tar exited ${tar.status}`);
-  writeFileSync(join(work, "names.txt"), `${names.join("\n")}\n`);
-  const grep = spawnSync("grep", ["-rhowIF", "-f", join(work, "names.txt"), join(work, "tree")], {
-    encoding: "utf8",
-    maxBuffer: 1 << 30,
-  });
-  if (grep.status > 1) throw new Error(`grep exited ${grep.status}`);
-  return new Set(grep.stdout.split("\n").filter(Boolean));
 }
 
 // One candidate through the three mechanical gates, in the protocol's order.
@@ -334,15 +327,16 @@ async function gates(dir, candidate, recipe, position) {
   const instance = await prepare(github(process.env.GITHUB_TOKEN), candidate, recipe);
   if (instance.excluded)
     return { ...base, event: "excluded", step: "preparation", reason: instance.excluded };
-  const work = mkdtempSync(join(tmpdir(), "walk-"));
-  writeFileSync(join(work, "instance.json"), JSON.stringify(instance));
-  const run = spawnSync(
-    "python3",
-    ["scripts/validate.py", join(work, "instance.json"), join(work, "result.json")],
-    { stdio: "inherit" },
-  );
-  if (run.status !== 0) throw new Error(`validate.py exited ${run.status}`);
-  const result = JSON.parse(readFileSync(join(work, "result.json"), "utf8"));
+  const result = await withTemp("walk-", (work) => {
+    writeFileSync(join(work, "instance.json"), JSON.stringify(instance));
+    const run = spawnSync(
+      "python3",
+      ["scripts/validate.py", join(work, "instance.json"), join(work, "result.json")],
+      { stdio: "inherit" },
+    );
+    if (run.status !== 0) throw new Error(`validate.py exited ${run.status}`);
+    return JSON.parse(readFileSync(join(work, "result.json"), "utf8"));
+  });
   if (result.verdict !== "passed")
     return {
       ...base,
@@ -509,7 +503,7 @@ async function main() {
 
   if (command === "open-audits") {
     // One issue per open audit, opened once; the log records its number.
-    const frame = JSON.parse(readFileSync(values.frame, "utf8"));
+    const frame = loadFrame(values.frame);
     const state = replay(frame.candidates, log);
     const due = state.pendingAuthor.map((id) => ["author", id]);
     for (const [reader, id] of due) {

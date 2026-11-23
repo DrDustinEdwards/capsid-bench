@@ -22,8 +22,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { roundAt, roundTime, QUICKNET } from "./seed.mjs";
-import { sha256 } from "./seed.mjs";
+import { roundAt, roundTime, QUICKNET, sha256 } from "./seed.mjs";
 
 export const REPOSITORY = "DrDustinEdwards/capsid-bench";
 export const WORKFLOW_IDENTITY = `https://github.com/${REPOSITORY}/.github/workflows/bench-run.yml@refs/heads/main`;
