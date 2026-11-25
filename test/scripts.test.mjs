@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 import { request } from "node:http";
 import { test } from "node:test";
 import { allowed, startProxy } from "../scripts/egress-proxy.mjs";
-import { imageFor, taskFromRow, testList } from "../scripts/load-swe.mjs";
+import { sweImageFor, taskFromRow, testList } from "../scripts/load-swe.mjs";
 import { jobBody } from "../scripts/post-job.mjs";
 import { buildReport, modelFailure } from "../scripts/report.mjs";
 import { countsFromReport, emptyDiffScore, testOutcome } from "../scripts/score.mjs";
@@ -143,7 +143,7 @@ test("the loader reads SWE-bench's JSON-text test lists and its image naming", (
   assert.deepEqual(testList('["a", "b"]'), ["a", "b"]);
   assert.deepEqual(testList(["a"]), ["a"]);
   assert.equal(
-    imageFor({ instance_id: "Owner__Repo-12" }, "swerebench"),
+    sweImageFor({ instance_id: "Owner__Repo-12" }, "swerebench"),
     "swerebench/sweb.eval.x86_64.owner_1776_repo-12:latest",
   );
   const task = taskFromRow(
