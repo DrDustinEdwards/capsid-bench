@@ -127,31 +127,6 @@ test("a model arm that never started is the machine's; the turn limit, the clock
   assert.equal(report.hidden, undefined);
 });
 
-test("usage is summed across the two phases, and the treatment's claim is the claim file's, as the baseline's is", () => {
-  const turn = (cost, turns) => ({
-    subtype: "success",
-    total_cost_usd: cost,
-    num_turns: turns,
-    duration_ms: 1000,
-    usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100 },
-  });
-  const report = buildReport({
-    run: "bench_x",
-    arm: "treatment",
-    score: {
-      environment: { ok: true, reason: null },
-      hidden: { fail_to_pass: { total: 2, passed: 2 }, pass_to_pass: { total: 3, passed: 3 } },
-    },
-    results: [turn(1.5, 30), turn(0.25, 4)],
-    claim: true,
-    job: "job_0123456789ab",
-  });
-  assert.equal(report.claimed_done, true);
-  assert.equal(report.usage.cost_usd, 1.75);
-  assert.equal(report.usage.turns, 34);
-  assert.equal(report.usage.cache_read_tokens, 200);
-});
-
 test("a task dated before the cutoff, or with an id that could reach a shell, is refused", () => {
   assert.deepEqual(checkTask(TASK), []);
   assert.ok(

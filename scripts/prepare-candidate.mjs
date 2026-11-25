@@ -2,9 +2,6 @@
 // One frame candidate made into a SWE-rebench-format instance, ready for validation
 // (protocol section 4, "Per task, mechanically" and "Frame"). Reads GitHub only.
 //
-//   GITHUB_TOKEN=... node scripts/prepare-candidate.mjs --frame frame/candidates.json \
-//     --repos frame/repos.json --task <task_id> --out instance.json
-//
 // What it fixes, each from the pull request and never from a later checkout:
 //   - the base commit: the parent of the fixing change. A merge commit's first parent;
 //     otherwise the merge commit's parent when that one commit carries exactly the pull
@@ -73,7 +70,6 @@ export function diffPath(text) {
   return Number.isInteger(half) ? header.slice(half + 5) : "";
 }
 
-// A unified diff split into its per-file parts, keyed by path.
 export function splitDiff(diff) {
   const parts = diff.split(/^(?=diff --git )/m).filter((p) => p.startsWith("diff --git "));
   return parts.map((text) => ({ path: diffPath(text), text }));
@@ -224,7 +220,6 @@ const WORD = /[A-Za-z_][A-Za-z0-9_]*/g;
 // letter after its first character (snake_case, name2, camelCase, PascalCase).
 const identifierLike = (word) => /[_0-9]/.test(word) || /[A-Z]/.test(word.slice(1));
 
-// The identifier-like names on the gold patch's added lines.
 export function addedIdentifiers(patch) {
   const names = new Set();
   for (const line of patch.split("\n")) {

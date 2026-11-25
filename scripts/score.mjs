@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 // Score one diff against one task's hidden tests.
 //
-//   node scripts/score.mjs tasks/x.json diff.patch out.json
-//
 // Writes { environment: { ok, reason }, hidden: { fail_to_pass, pass_to_pass },
 // pass_to_pass_failures: [...] }, the counts /bench/score takes. The treatment's
 // verifier runs the same scoring and hands the agent only pass_to_pass_failures: the
