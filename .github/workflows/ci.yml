@@ -15,9 +15,19 @@ concurrency:
 
 jobs:
   test:
+    # The one check the ruleset requires carries the others: a red seed, seal, stop-agent,
+    # flatten-repo, claim-tool or egress-dns job fails this one, so it cannot merge.
+    needs: [seed, seal, stop-agent, flatten-repo, claim-tool, egress-dns]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: The other jobs passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for r in ${RESULTS}; do [ "${r}" = success ] || { echo "a job this one needs ended ${r}" >&2; exit 1; }; done
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -167,7 +177,8 @@ jobs:
   flatten-repo:
     # scripts/flatten-repo.sh against a real container: after it, /testbed must hold one
     # commit and no remotes, the later commit's object must be gone, and every file the
-    # base tracked (one a .gitignore matches included) must be in that commit unchanged.
+    # base tracked (one a .gitignore matches included) and every untracked one on disk must be
+    # in that commit unchanged, so the agent's diff never holds a file the image carried.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -197,10 +208,28 @@ jobs:
             [ "$(git rev-list --all | wc -l)" = 1 ] || { echo "more than one commit" >&2; exit 1; }
             [ -z "$(git remote)" ] || { echo "a remote is left" >&2; exit 1; }
             ! git cat-file -e "$(cat /tmp/fix-sha)" 2>/dev/null || { echo "the fix commit is still readable" >&2; exit 1; }
-            [ "$(git ls-files | sort | tr "\n" " ")" = ".gitignore a.txt d [x]/*.txt ignored.txt " ] || { echo "tracked files differ: $(git ls-files)" >&2; exit 1; }
+            [ "$(git ls-files | sort | tr "\n" " ")" = ".gitignore a.txt d [x]/*.txt ignored.txt new.txt " ] || { echo "tracked files differ: $(git ls-files)" >&2; exit 1; }
             [ "$(git show HEAD:a.txt)" = base ]
-            [ -e new.txt ] && ! git ls-files --error-unmatch new.txt 2>/dev/null'
+            [ "$(git show HEAD:new.txt)" = untracked ]
+            [ -z "$(git add -A && git diff --cached --name-only)" ] || { echo "the diff is not empty before the agent acts" >&2; exit 1; }'
           [ "$(docker exec task git -C /testbed rev-parse HEAD)" = "${base}" ]
+
+  egress-dns:
+    # The task container's only way out is the proxy (bench-run.yml): on an internal network
+    # a name outside the network must not resolve, or a lookup could carry data past the
+    # proxy's allowlist, while the proxy's own name must.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve inside the internal network
+        run: |
+          set -euo pipefail
+          IMAGE=node:26.11.1-bookworm@sha256:f1233c415b41ffcf237c717b3dea92e9d4ea006e0e4c71edcb790605d74f5404
+          docker network create --internal bench-internal
+          docker run -d --name proxy --network bench-internal --entrypoint sleep "${IMAGE}" infinity
+          docker run -d --name task --network bench-internal --entrypoint sleep "${IMAGE}" infinity
+          docker exec task getent hosts proxy > /dev/null || { echo "the proxy's name does not resolve" >&2; exit 1; }
+          if docker exec task getent hosts example.com; then echo "an outside name resolved from the internal network" >&2; exit 1; fi
 
   claim-tool:
     # The claim path end to end against a real container: scripts/bench-claim.sh installed

@@ -14,6 +14,7 @@
 // response is "in". Nothing here is an assumption of the confirmatory analysis.
 
 import { analyze, rng } from "./analyze.mjs";
+import { isMain } from "./net.mjs";
 
 const ICC = 0.1;
 // Share of repositories that contribute 2 tasks: about 0.35 when the walk is replayed on
@@ -176,7 +177,7 @@ export function simulate({ reps, resamples, seed, sizes = [120, 160] }) {
   return out;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2);
   const flag = (name, d) => {
     const i = argv.indexOf(`--${name}`);

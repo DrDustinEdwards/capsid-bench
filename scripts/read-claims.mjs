@@ -13,6 +13,7 @@
 // reported as tampered and is no claim, the agent's own outcome rather than unjudged.
 
 import { readFileSync } from "node:fs";
+import { isMain } from "./net.mjs";
 
 function entries(text) {
   return text
@@ -54,7 +55,7 @@ function readOrNull(file) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const [finalFile, deliveredFile] = process.argv.slice(2);
   process.stdout.write(
     JSON.stringify(readClaims(readOrNull(finalFile) ?? "", readOrNull(deliveredFile))),

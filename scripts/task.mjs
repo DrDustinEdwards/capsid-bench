@@ -19,6 +19,7 @@
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { withIssue } from "./issue.mjs";
+import { isMain } from "./net.mjs";
 
 const SOURCES = ["swe-rebench", "swe-bench-live", "own"];
 const SPLITS = ["pilot", "full", "excluded"];
@@ -48,6 +49,13 @@ export function checkTask(task) {
     if (typeof task[field] === "string" && /[\r\n]/.test(task[field]))
       problems.push(`${field} may not hold a line break (it is written to GITHUB_OUTPUT)`);
   }
+  // The image holds the run's credentials while it runs, so it is named by content, not by a
+  // tag someone else can move (scripts/image-digest.mjs writes the pin).
+  if (str("image") && !/^[^\s@]+@sha256:[0-9a-f]{64}$/.test(task.image))
+    problems.push("image must be pinned by digest: name:tag@sha256:<64 hex digits>");
+  // The repo is cloned from https://github.com/<repo>.git, so another host must not fit.
+  if (str("repo") && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(task.repo))
+    problems.push("repo must be owner/name on GitHub (letters, digits, dot, underscore, hyphen)");
   if (!SOURCES.includes(task.source)) problems.push(`source must be one of ${SOURCES.join(", ")}`);
   if (!SPLITS.includes(task.split)) problems.push(`split must be one of ${SPLITS.join(", ")}`);
   if (!Array.isArray(task.fail_to_pass) || task.fail_to_pass.length === 0)
@@ -107,7 +115,7 @@ function load(file) {
   return task;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const [command, file, out] = process.argv.slice(2);
   const task = load(file);
   if (command === "register") {

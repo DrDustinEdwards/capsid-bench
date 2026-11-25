@@ -14,6 +14,7 @@
 // rather than zero.
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { isMain } from "./net.mjs";
 
 function readJsonFile(file) {
   try {
@@ -100,7 +101,7 @@ export function buildReport({
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const [out, ...rest] = process.argv.slice(2);
   const opts = { results: [] };
   for (let i = 0; i < rest.length; i += 2) {

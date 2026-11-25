@@ -76,6 +76,8 @@ export async function askSecondReader(config, prompt, key, fetchImpl = fetch) {
     config.url,
     {
       method: "POST",
+      // A redirect would carry the key to another URL than the registered one.
+      redirect: "error",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: config.model,

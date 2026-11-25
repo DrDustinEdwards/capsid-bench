@@ -22,7 +22,7 @@ const TASK = {
   repo: "sample/repo",
   issue_created_at: "2026-07-15T00:00:00Z",
   base_commit: "a".repeat(40),
-  image: "swerebench/sweb.eval.x86_64.sample_1776_repo-1:latest",
+  image: `swerebench/sweb.eval.x86_64.sample_1776_repo-1:latest@sha256:${"b".repeat(64)}`,
   problem_statement: "It breaks.",
   gold_patch: "diff --git a/x b/x\n",
   fail_to_pass: ["t::new_a", "t::new_b"],
@@ -139,6 +139,15 @@ test("a task dated before the cutoff, or with an id that could reach a shell, is
   assert.ok(checkTask({ ...TASK, task_id: "x; rm -rf /" }).some((p) => /task_id/.test(p)));
 });
 
+test("an image a tag can move, or a repo on another host, is refused", () => {
+  assert.ok(checkTask({ ...TASK, image: "node:26.11.1-bookworm" }).some((p) => /digest/.test(p)));
+  for (const repo of ["evil.example@host/x", "a/b/c", "a:b/c", "x"])
+    assert.ok(
+      checkTask({ ...TASK, repo }).some((p) => /repo/.test(p)),
+      repo,
+    );
+});
+
 test("the loader reads SWE-bench's JSON-text test lists and its image naming", () => {
   assert.deepEqual(testList('["a", "b"]'), ["a", "b"]);
   assert.deepEqual(testList(["a"]), ["a"]);
@@ -165,7 +174,7 @@ test("the loader reads SWE-bench's JSON-text test lists and its image naming", (
       namespace: "swerebench",
     },
   );
-  assert.deepEqual(checkTask(task), []);
+  assert.deepEqual(checkTask({ ...task, image: TASK.image }), []);
 });
 
 test("the issue goes inside an external fence it cannot close", () => {

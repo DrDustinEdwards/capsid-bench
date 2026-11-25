@@ -15,7 +15,8 @@
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { retryingFetch } from "./net.mjs";
+import { isMain, retryingFetch } from "./net.mjs";
+import { pinImage } from "./image-digest.mjs";
 import { checkTask } from "./task.mjs";
 
 // SWE-bench stores the two test lists as JSON text; some exports store real arrays.
@@ -74,7 +75,7 @@ async function rows(dataset, config, split) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const args = Object.fromEntries(
     process.argv
       .slice(2)
@@ -103,6 +104,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   let bad = 0;
   for (const row of found) {
     const task = taskFromRow(row, opts);
+    task.image = await pinImage(task.image);
     const problems = checkTask(task);
     if (problems.length) {
       bad++;
