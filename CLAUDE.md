@@ -4,10 +4,10 @@ The harness for the paired comparison of Claude Code with and without Capsid: fr
 
 ## Rules every repo shares
 
-- **Tests.** Keep the minimal set (a few browser tests for flows that must never break, one integration test per real behavior, unit tests only for tricky logic, shared code tested once where it lives), and remove any test that pins design, repeats coverage or has never caught a real mistake, unless it guards a harm that cannot be undone.
-- **Shared code.** Before writing anything another site might have, read https://github.com/DrDustinEdwards/devkit/blob/shared-list/SHARED.md (CI's shared-code check fails on a copy). Change shared code in place and delete what a change replaces in the same PR.
+- **Tests.** Keep the minimal set: a few browser tests for flows that must never break, one integration test per real behavior, unit tests only for tricky logic, shared code tested once where it lives. Remove a test that pins design, repeats coverage or never caught a mistake, unless it guards a harm that cannot be undone.
+- **Shared code.** Before writing anything another site might have, check https://github.com/DrDustinEdwards/devkit/blob/shared-list/SHARED.md. Change shared code in place and delete what the change replaces in the same PR.
 - **Secrets.** Never commit or print a key, token, `.dev.vars` or `.env`.
-- **Reproduce first.** A report that something is broken names a cause; reproduce the failure before fixing it, and report red before and green after.
+- **Reproduce first.** Reproduce a reported failure before fixing it; report red before and green after.
 
 ## Rules for this repo
 
