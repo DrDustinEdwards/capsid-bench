@@ -127,7 +127,7 @@ test("a model arm that never started is the machine's; the turn limit, the clock
   assert.equal(report.hidden, undefined);
 });
 
-test("a task dated before the cutoff, or with an id that could reach a shell, is refused", () => {
+test("a task dated before the cutoff, or with an id, image or repo that could reach a shell or move, is refused", () => {
   assert.deepEqual(checkTask(TASK), []);
   assert.ok(
     checkTask({ ...TASK, issue_created_at: "2026-05-01T00:00:00Z" }).some((p) => /cutoff/.test(p)),
@@ -137,9 +137,6 @@ test("a task dated before the cutoff, or with an id that could reach a shell, is
     [],
   );
   assert.ok(checkTask({ ...TASK, task_id: "x; rm -rf /" }).some((p) => /task_id/.test(p)));
-});
-
-test("an image a tag can move, or a repo on another host, is refused", () => {
   assert.ok(checkTask({ ...TASK, image: "node:26.11.1-bookworm" }).some((p) => /digest/.test(p)));
   for (const repo of ["evil.example@host/x", "a/b/c", "a:b/c", "x"])
     assert.ok(
