@@ -32,8 +32,10 @@ RERUNS = 3
 TIMEOUT = 1800
 
 
-def run(image, eval_script, patch, parse):
-    """One offline run: a fresh container, the patch applied if any, the eval script."""
+def run(image, eval_script, patch, parse, check_cmd=None):
+    """One offline run: a fresh container, the patch applied if any, check_cmd (run in the
+    repository after the patch, which must succeed) and then the eval script. Returns the
+    status map, or None when anything failed, and the log."""
     with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "eval.sh").write_text(eval_script)
         Path(tmp, "patch.diff").write_text(patch or "")
@@ -43,23 +45,27 @@ def run(image, eval_script, patch, parse):
             subprocess.run(["docker", "cp", f"{tmp}/eval.sh", f"{name}:/eval.sh"], check=True, capture_output=True)
             if patch:
                 subprocess.run(["docker", "cp", f"{tmp}/patch.diff", f"{name}:/tmp/patch.diff"], check=True, capture_output=True)
-                applied = subprocess.run(["docker", "exec", "-w", "/testbed", name, "git", "apply", "--verbose", "/tmp/patch.diff"], capture_output=True)
-                if applied.returncode != 0:
-                    return None
+                if exec_in(name, "git", "apply", "--verbose", "/tmp/patch.diff").returncode != 0:
+                    return None, ""
+            if check_cmd and exec_in(name, "/bin/bash", "-c", check_cmd).returncode != 0:
+                return None, ""
             try:
                 # One stream, merged inside the container: the harness marks the test output
                 # with `: '>>>>> Start Test Output'` under set -x, which bash writes to stderr,
                 # while the tests write to stdout. Read apart, the markers would enclose nothing.
                 out = subprocess.run(["docker", "exec", name, "/bin/bash", "-c", "/bin/bash /eval.sh 2>&1"], capture_output=True, timeout=TIMEOUT)
-                log = out.stdout.decode("utf-8", "replace")
             except subprocess.TimeoutExpired:
-                return None
-            log_path = Path(tmp, "test_output.txt")
-            log_path.write_text(log)
-            status, ok = parse(str(log_path))
-            return status if ok else None
+                return None, ""
+            log = out.stdout.decode("utf-8", "replace")
+            Path(tmp, "test_output.txt").write_text(log)
+            status, ok = parse(str(Path(tmp, "test_output.txt")))
+            return (status if ok else None), log
         finally:
             subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+
+
+def exec_in(name, *cmd):
+    return subprocess.run(["docker", "exec", "-w", "/testbed", name, *cmd], capture_output=True)
 
 
 def lists(before, after, passed, failed):
@@ -112,8 +118,8 @@ def main():
             result.update(verdict="build failed")
         else:
             parse = lambda path: get_logs_eval(spec, path)
-            befores = [run(spec.instance_image_key, spec.eval_script, None, parse) for _ in range(RERUNS)]
-            afters = [run(spec.instance_image_key, spec.eval_script, instance["patch"], parse) for _ in range(RERUNS)]
+            befores = [run(spec.instance_image_key, spec.eval_script, None, parse)[0] for _ in range(RERUNS)]
+            afters = [run(spec.instance_image_key, spec.eval_script, instance["patch"], parse)[0] for _ in range(RERUNS)]
             result.update(verdict(befores, afters, test_passed, test_failed))
             # Runs whose log the parser could not read (tests errored or timed out, or the
             # patch did not apply), so a verdict reached on empty runs shows as such.

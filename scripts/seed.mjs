@@ -10,6 +10,7 @@
 //
 // Needs @noble/curves (locked in tools/package-lock.json); NOBLE_BLS names its bls12-381.js file.
 
+import { runMain } from "./net.mjs";
 import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
@@ -103,9 +104,4 @@ async function main() {
   );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) => {
-    console.error(err.message);
-    process.exit(1);
-  });
-}
+runMain(import.meta, main);

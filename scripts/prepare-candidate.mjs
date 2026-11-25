@@ -24,7 +24,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { isTestPath } from "./candidates.mjs";
-import { githubHeaders, rateLimitedOrDown, retryingFetch } from "./net.mjs";
+import { githubHeaders, rateLimitedOrDown, retryingFetch, runMain } from "./net.mjs";
 
 export const BASE_NOT_FOUND = "base commit not found";
 
@@ -264,9 +264,4 @@ async function main() {
   );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) => {
-    console.error(err.message);
-    process.exit(1);
-  });
-}
+runMain(import.meta, main);

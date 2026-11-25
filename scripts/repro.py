@@ -16,12 +16,11 @@ The result is written as {"passed": bool, "reason": str} for /bench/repro."""
 
 import json
 import re
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
-TIMEOUT = 1800
+from validate import run
+
 # A base failure raised before the test could exercise the bug: the test imports or
 # parses something the fix adds. pytest's short summary line names the exception, and a
 # JavaScript runner's names the module.
@@ -83,34 +82,6 @@ def verdict(base, base_log, head):
     if still:
         return False, f"your test did not pass on your diff ({len(still)} of {len(real)} failing tests still do not pass)"
     return True, f"your test failed on the base and passed on your diff ({len(real)} test{'s' if len(real) != 1 else ''})"
-
-
-def run(image, eval_script, patch, parse, check_cmd=None):
-    """One offline run, as scripts/validate.py does it, returning the status map and the log.
-    check_cmd, run in the repository after the patch, must succeed or the run is None."""
-    with tempfile.TemporaryDirectory() as tmp:
-        Path(tmp, "eval.sh").write_text(eval_script)
-        Path(tmp, "patch.diff").write_text(patch or "")
-        name = f"repro-{Path(tmp).name}"
-        subprocess.run(["docker", "run", "-d", "--name", name, "--network", "none", image, "sleep", "infinity"], check=True, capture_output=True)
-        try:
-            subprocess.run(["docker", "cp", f"{tmp}/eval.sh", f"{name}:/eval.sh"], check=True, capture_output=True)
-            if patch:
-                subprocess.run(["docker", "cp", f"{tmp}/patch.diff", f"{name}:/tmp/patch.diff"], check=True, capture_output=True)
-                if subprocess.run(["docker", "exec", "-w", "/testbed", name, "git", "apply", "/tmp/patch.diff"], capture_output=True).returncode != 0:
-                    return None, ""
-            if check_cmd and subprocess.run(["docker", "exec", "-w", "/testbed", name, "/bin/bash", "-c", check_cmd], capture_output=True).returncode != 0:
-                return None, ""
-            try:
-                out = subprocess.run(["docker", "exec", name, "/bin/bash", "-c", "/bin/bash /eval.sh 2>&1"], capture_output=True, timeout=TIMEOUT)
-            except subprocess.TimeoutExpired:
-                return None, ""
-            log = out.stdout.decode("utf-8", "replace")
-            Path(tmp, "test_output.txt").write_text(log)
-            status, ok = parse(str(Path(tmp, "test_output.txt")))
-            return (status if ok else None), log
-        finally:
-            subprocess.run(["docker", "rm", "-f", name], capture_output=True)
 
 
 def spec_for(task, test_patch):

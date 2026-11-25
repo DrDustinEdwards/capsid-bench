@@ -25,6 +25,7 @@
 // Needs tlock-js and sigstore (locked in tools/package-lock.json); SEAL_MODULES names the
 // node_modules directory they are installed in.
 
+import { runMain } from "./net.mjs";
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -195,9 +196,4 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) => {
-    console.error(`seal: ${err.message}`);
-    process.exit(1);
-  });
-}
+runMain(import.meta, main, "seal: ");

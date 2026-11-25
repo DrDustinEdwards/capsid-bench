@@ -19,7 +19,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { githubHeaders, rateLimitedOrDown, retryingFetch, sleep } from "./net.mjs";
+import { githubHeaders, rateLimitedOrDown, retryingFetch, runMain, sleep } from "./net.mjs";
 import { sha256 } from "./seed.mjs";
 
 export const ISSUE_CUTOFF = "2026-06-30T23:59:59Z"; // scripts/task.mjs CUTOFF
@@ -358,9 +358,4 @@ async function main() {
   console.log(lines.join("\n"));
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) => {
-    console.error(err.message);
-    process.exit(1);
-  });
-}
+runMain(import.meta, main);
