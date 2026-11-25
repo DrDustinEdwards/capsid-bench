@@ -3,8 +3,6 @@
 // repository list scripts/repos.py wrote and then hashed. Reads GitHub only: registers
 // nothing, starts no run, calls no model.
 //
-//   GITHUB_TOKEN=... node scripts/candidates.mjs --repos repos.json --freeze 2026-10-20 --out candidates.json
-//
 // A repository is eligible when GitHub gives its primary language as Python, JavaScript
 // or TypeScript, its license is permissive, and its owner is not the author's. A
 // candidate is a merged pull request in an eligible repository that:
@@ -42,7 +40,6 @@ export const AUTHOR_OWNERS = new Set(["drdustinedwards"]);
 // Test paths: a tests or spec directory, test_*, *_test.*, *.test.*, *.spec.* or conftest.py.
 const TEST_PATH =
   /(^|\/)(tests?|testing|__tests__|spec)(\/|$)|(^|\/)test_[^/]*$|_test\.[^/]+$|\.(test|spec)\.[^/]+$|(^|\/)conftest\.py$/;
-// GitHub's search refuses a query over 256 characters.
 const QUERY_LIMIT = 256;
 
 export const isTestPath = (path) => TEST_PATH.test(path);
