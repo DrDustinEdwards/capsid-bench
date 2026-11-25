@@ -7,14 +7,8 @@
 // State is one append-only log (log.jsonl on the `walk` branch) and the instances that
 // passed the gates (instances/<task_id>.json), replayed on every run. Strictly in order:
 // no candidate is considered until the one before it, and both audits, are recorded.
-//
-//   node scripts/walk.mjs start --dir <walk dir> --beacon seed.json --registration <sha256>
-//
-// N is 160, fixed in scripts/analyze.mjs; start refuses any other --n.
-//   node scripts/walk.mjs step --frame frame/candidates.json --repos frame/repos.json --dir <walk dir>
-//   node scripts/walk.mjs open-audits --dir <walk dir> --repo owner/name
-//   node scripts/walk.mjs record --dir <walk dir> --issue <n> --commenter <login> --body-file <f> --author <login>
-//   node scripts/walk.mjs status --frame frame/candidates.json --dir <walk dir>
+// Commands: start, step, open-audits, record, status. N is 160, fixed in
+// scripts/analyze.mjs; start refuses any other --n.
 //
 // `step` does one thing and prints it as JSON: { action, ... }. Actions: skip (repository
 // at the cap), validate (one candidate through preparation, validation and the leakage
@@ -45,7 +39,7 @@ import {
   secondPrompt,
   secondReaderConfig,
 } from "./audit.mjs";
-import { githubHeaders, withTemp } from "./net.mjs";
+import { githubHeaders, runMain, withTemp } from "./net.mjs";
 import { sha256 } from "./seed.mjs";
 
 // The frozen frame; the walk refuses any other.
@@ -70,7 +64,6 @@ export const readLog = (path) =>
         .map((l) => JSON.parse(l))
     : [];
 
-// The walk's state, replayed from the log.
 export function replay(candidates, log) {
   const start = log[0];
   if (start?.event !== "start") throw new Error("the log has no start record");
@@ -180,7 +173,6 @@ async function namesInBase(repo, base, names) {
   });
 }
 
-// One candidate through the three mechanical gates, in the protocol's order.
 async function gates(dir, candidate, recipe, position) {
   const base = { position, task_id: candidate.task_id, repo: candidate.repo };
   const instance = await prepare(github(process.env.GITHUB_TOKEN), candidate, recipe);
@@ -424,9 +416,4 @@ async function createIssue(repo, title, body) {
   return (await response.json()).number;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) => {
-    console.error(err.message);
-    process.exit(1);
-  });
-}
+runMain(import.meta, main);

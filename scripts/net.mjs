@@ -51,3 +51,12 @@ export async function withTemp(prefix, fn) {
     rmSync(work, { recursive: true, force: true });
   }
 }
+
+// Run a script's main() when the file is the entry point; print the error and exit 1.
+export function runMain(meta, main, prefix = "") {
+  if (meta.url !== `file://${process.argv[1]}`) return;
+  main().catch((err) => {
+    console.error(`${prefix}${err.message}`);
+    process.exit(1);
+  });
+}
