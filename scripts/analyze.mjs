@@ -28,6 +28,7 @@
 // before it was still going) is dropped from the primary set and counted.
 
 import { readFileSync } from "node:fs";
+import { isMain } from "./net.mjs";
 
 export const MODEL_ARMS = ["baseline", "treatment"];
 export const SLOTS = 3;
@@ -455,7 +456,7 @@ export function analyze(
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2);
   const flag = (name) => {
     const i = argv.indexOf(`--${name}`);

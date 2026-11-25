@@ -9,6 +9,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMain } from "./net.mjs";
 
 export function verifierResult(score) {
   if (!score?.environment?.ok || !score.hidden) {
@@ -25,7 +26,7 @@ export function verifierResult(score) {
   return `${passed} of ${total} existing tests passed. These failed:\n${listed}${more}`;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   let score = null;
   try {
     score = JSON.parse(readFileSync(process.argv[2], "utf8"));

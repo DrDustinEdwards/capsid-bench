@@ -14,6 +14,7 @@
 
 import { readFileSync } from "node:fs";
 import { withIssue } from "./issue.mjs";
+import { isMain } from "./net.mjs";
 
 // The job's body: Capsid's GOAL / DO / OUT OF SCOPE / DONE WHEN layout around the issue,
 // fenced exactly as the baseline receives it (scripts/issue.mjs).
@@ -77,7 +78,7 @@ async function call(url, key, args) {
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const [runId, taskId, problemFile] = process.argv.slice(2);
   const key = process.env.BENCH_DRIVER_KEY;
   if (!key) {

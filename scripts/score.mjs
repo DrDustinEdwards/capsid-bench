@@ -22,6 +22,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { isMain } from "./net.mjs";
 
 // The report's two lists for one instance, as counts over the task's own test lists.
 export function countsFromReport(task, instanceReport) {
@@ -84,6 +85,17 @@ function scoreBenchmark(task, diff, work) {
   // PASS_TO_PASS test passes. Without this, a run that changed nothing and claimed
   // done would be unjudged instead of a false claim.
   if (!diff.trim()) return emptyDiffScore(task);
+  // The harness runs the image it finds under its own tag and pulls only when it has none, so
+  // the task's pinned digest is pulled and given that tag first.
+  const pulled = run("docker", ["pull", "--quiet", task.image]);
+  if (pulled.status !== 0)
+    return {
+      environment: {
+        ok: false,
+        reason: `could not pull the task image: ${pulled.out.slice(-300)}`,
+      },
+    };
+  run("docker", ["tag", task.image, task.image.split("@")[0]]);
   const preds = join(work, "preds.json");
   writeFileSync(
     preds,
@@ -227,7 +239,7 @@ function scoreOwn(task, diffFile, work) {
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const [taskFile, diffFile, out] = process.argv.slice(2);
   const task = JSON.parse(readFileSync(taskFile, "utf8"));
   const work = join(process.env.RUNNER_TEMP ?? "/tmp", `score-${process.pid}`);

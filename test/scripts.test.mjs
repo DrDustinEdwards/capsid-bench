@@ -22,7 +22,7 @@ const TASK = {
   repo: "sample/repo",
   issue_created_at: "2026-07-15T00:00:00Z",
   base_commit: "a".repeat(40),
-  image: "swerebench/sweb.eval.x86_64.sample_1776_repo-1:latest",
+  image: `swerebench/sweb.eval.x86_64.sample_1776_repo-1:latest@sha256:${"b".repeat(64)}`,
   problem_statement: "It breaks.",
   gold_patch: "diff --git a/x b/x\n",
   fail_to_pass: ["t::new_a", "t::new_b"],
@@ -127,7 +127,7 @@ test("a model arm that never started is the machine's; the turn limit, the clock
   assert.equal(report.hidden, undefined);
 });
 
-test("a task dated before the cutoff, or with an id that could reach a shell, is refused", () => {
+test("a task dated before the cutoff, or with an id, image or repo that could reach a shell or move, is refused", () => {
   assert.deepEqual(checkTask(TASK), []);
   assert.ok(
     checkTask({ ...TASK, issue_created_at: "2026-05-01T00:00:00Z" }).some((p) => /cutoff/.test(p)),
@@ -137,6 +137,12 @@ test("a task dated before the cutoff, or with an id that could reach a shell, is
     [],
   );
   assert.ok(checkTask({ ...TASK, task_id: "x; rm -rf /" }).some((p) => /task_id/.test(p)));
+  assert.ok(checkTask({ ...TASK, image: "node:26.11.1-bookworm" }).some((p) => /digest/.test(p)));
+  for (const repo of ["evil.example@host/x", "a/b/c", "a:b/c", "x"])
+    assert.ok(
+      checkTask({ ...TASK, repo }).some((p) => /repo/.test(p)),
+      repo,
+    );
 });
 
 test("the loader reads SWE-bench's JSON-text test lists and its image naming", () => {
@@ -165,7 +171,7 @@ test("the loader reads SWE-bench's JSON-text test lists and its image naming", (
       namespace: "swerebench",
     },
   );
-  assert.deepEqual(checkTask(task), []);
+  assert.deepEqual(checkTask({ ...task, image: TASK.image }), []);
 });
 
 test("the issue goes inside an external fence it cannot close", () => {

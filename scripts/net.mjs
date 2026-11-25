@@ -3,6 +3,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -52,9 +53,15 @@ export async function withTemp(prefix, fn) {
   }
 }
 
+// Whether the module at `url` (import.meta.url) is the script node was started on. A plain
+// `file://${argv[1]}` comparison fails on Windows, where the path has a drive letter and
+// backslashes.
+export const isMain = (url) =>
+  process.argv[1] !== undefined && url === pathToFileURL(process.argv[1]).href;
+
 // Run a script's main() when the file is the entry point; print the error and exit 1.
 export function runMain(meta, main, prefix = "") {
-  if (meta.url !== `file://${process.argv[1]}`) return;
+  if (!isMain(meta.url)) return;
   main().catch((err) => {
     console.error(`${prefix}${err.message}`);
     process.exit(1);

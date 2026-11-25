@@ -14,6 +14,7 @@
 
 import { createServer } from "node:http";
 import { connect } from "node:net";
+import { isMain } from "./net.mjs";
 
 export function allowed(target, allowlist) {
   const match = /^([a-z0-9.-]+):(\d+)$/i.exec(target ?? "");
@@ -47,7 +48,7 @@ export function startProxy(allowlist, port = 3128, log = (line) => console.log(l
   return new Promise((resolve) => server.listen(port, () => resolve(server)));
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const allowlist = (process.env.ALLOW ?? "")
     .split(",")
     .map((h) => h.trim().toLowerCase())
