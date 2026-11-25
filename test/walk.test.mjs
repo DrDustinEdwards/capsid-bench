@@ -3,17 +3,14 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
-  FRAME_SHA256,
   auditBody,
   fenced,
-  nextAction,
   parseDecision,
   parseModelDecision,
-  permutation,
-  replay,
   secondPrompt,
   secondReaderConfig,
-} from "../scripts/walk.mjs";
+} from "../scripts/audit.mjs";
+import { FRAME_SHA256, nextAction, permutation, replay } from "../scripts/walk.mjs";
 
 // The walk (protocol section 4, "Audit" and "Draw") replayed from hand-made logs over a
 // fake frame: repositories in the "sample" namespace.
