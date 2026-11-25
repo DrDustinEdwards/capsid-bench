@@ -28,7 +28,7 @@ export function testList(value) {
   return [];
 }
 
-export function imageFor(row, namespace) {
+export function sweImageFor(row, namespace) {
   if (typeof row.docker_image === "string" && row.docker_image) return row.docker_image;
   if (typeof row.image_name === "string" && row.image_name) return row.image_name;
   return `${namespace}/sweb.eval.x86_64.${row.instance_id.replace(/__/g, "_1776_").toLowerCase()}:latest`;
@@ -42,7 +42,7 @@ export function taskFromRow(row, { source, dataset, split, benchSplit, namespace
     repo: row.repo,
     issue_created_at: row.created_at,
     base_commit: row.base_commit,
-    image: imageFor(row, namespace),
+    image: sweImageFor(row, namespace),
     problem_statement: row.problem_statement,
     gold_patch: row.patch,
     fail_to_pass: testList(row.FAIL_TO_PASS),
