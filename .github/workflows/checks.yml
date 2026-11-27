@@ -11,7 +11,7 @@ name: checks
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, edited, ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review]
   merge_group:
   # Run by hand once to clean the footer from every past pull request.
   workflow_dispatch:
@@ -33,7 +33,7 @@ jobs:
       pull-requests: write
       id-token: write
       checks: write
-    uses: DrDustinEdwards/devkit/.github/workflows/pr.yml@2b2966a64e8639c0658241f5d83e9c6b7db94f44 # v0.65.0
+    uses: DrDustinEdwards/devkit/.github/workflows/pr.yml@22893f4b81049f7eeb019864e7e73257b1b7892f # v0.67.0
     with:
       review: true
       # The root install is the lint tooling and devkit, as in ci.yml; no-bloat counts against .no-bloat.json.
