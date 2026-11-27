@@ -11,7 +11,7 @@ name: checks
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, edited, ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review]
   merge_group:
   # Run by hand once to clean the footer from every past pull request.
   workflow_dispatch:
