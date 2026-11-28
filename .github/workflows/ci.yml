@@ -15,9 +15,8 @@ concurrency:
 
 jobs:
   test:
-    # The one check the ruleset requires carries the others: a red seed, seal, stop-agent,
-    # flatten-repo, claim-tool or egress-dns job fails this one, so it cannot merge.
-    needs: [seed, seal, stop-agent, flatten-repo, claim-tool, egress-dns]
+    # The one check the ruleset requires carries the others: a red seed or seal job fails this one, so it cannot merge.
+    needs: [seed, seal]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -117,7 +116,7 @@ jobs:
       - name: Sign with Sigstore and verify the identity and commit
         # On main only: this writes a public Rekor entry. It checks the way
         # scripts/unseal.mjs verifies a seal, with this workflow's identity in place of
-        # bench-run.yml's.
+        # the retired bench-run.yml's.
         if: github.event_name == 'push'
         run: |
           set -euo pipefail
@@ -136,131 +135,3 @@ jobs:
             if (!refused) throw new Error("a wrong commit verified");
             console.log("signed at Rekor index", bundle.verificationMaterial.tlogEntries[0].logIndex);
           '
-
-  stop-agent:
-    # scripts/stop-agent.sh against a real container: a process left running after the
-    # clock ran out must be gone, the container's init must survive, and the marker must
-    # say the clock ran out. Any other exit code must leave everything alone.
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Stop what the agent left running
-        run: |
-          set -euo pipefail
-          docker run -d --name task --entrypoint sleep node:26.11.1-bookworm@sha256:f1233c415b41ffcf237c717b3dea92e9d4ea006e0e4c71edcb790605d74f5404 infinity
-          docker exec -d task sh -c 'while true; do date > /tmp/still-writing; sleep 1; done'
-          sleep 2
-          scripts/stop-agent.sh 1 "${RUNNER_TEMP}/not-timed-out"
-          [ ! -e "${RUNNER_TEMP}/not-timed-out" ] || { echo "a non-timeout exit wrote the marker" >&2; exit 1; }
-          docker exec task sh -c 'ls /proc | grep -c "^[0-9]"' | awk '$1 < 3 { exit 1 }' || { echo "a non-timeout exit stopped processes" >&2; exit 1; }
-          scripts/stop-agent.sh 124 "${RUNNER_TEMP}/timed-out"
-          [ "$(cat "${RUNNER_TEMP}/timed-out")" = true ]
-          sleep 2
-          before=$(docker exec task cat /tmp/still-writing)
-          sleep 2
-          [ "$(docker exec task cat /tmp/still-writing)" = "${before}" ] || { echo "the left-over process is still writing" >&2; exit 1; }
-          [ "$(docker inspect -f '{{.State.Running}}' task)" = true ] || { echo "the container's init was killed" >&2; exit 1; }
-          # An error stop stops leftovers the same way and writes its own marker.
-          docker exec -d task sh -c 'while true; do date > /tmp/after-error; sleep 1; done'
-          sleep 2
-          scripts/stop-agent.sh error "${RUNNER_TEMP}/stopped-on-error"
-          [ "$(cat "${RUNNER_TEMP}/stopped-on-error")" = true ]
-          sleep 2
-          before=$(docker exec task cat /tmp/after-error)
-          sleep 2
-          [ "$(docker exec task cat /tmp/after-error)" = "${before}" ] || { echo "a process left after an error stop is still writing" >&2; exit 1; }
-
-  flatten-repo:
-    # scripts/flatten-repo.sh against a real container: after it, /testbed must hold one
-    # commit and no remotes, the later commit's object must be gone, and every file the
-    # base tracked (one a .gitignore matches included) and every untracked one on disk must be
-    # in that commit unchanged, so the agent's diff never holds a file the image carried.
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Flatten a repo with a later fix in its history
-        run: |
-          set -euo pipefail
-          docker run -d --name task --entrypoint sleep node:26.11.1-bookworm@sha256:f1233c415b41ffcf237c717b3dea92e9d4ea006e0e4c71edcb790605d74f5404 infinity
-          docker exec task sh -c '
-            set -e
-            git config --global user.name t; git config --global user.email t@example.com
-            mkdir /testbed; cd /testbed; git init -q
-            printf "ignored.txt\n" > .gitignore
-            printf "base\n" > a.txt; printf "kept\n" > ignored.txt; mkdir -p "d [x]"; printf "glob\n" > "d [x]/*.txt"
-            git add .gitignore a.txt "d [x]/*.txt"; git add -f ignored.txt; git commit -q -m base
-            printf "fix\n" > a.txt; git commit -q -am fix; git rev-parse HEAD > /tmp/fix-sha
-            git checkout -q HEAD~1; git remote add origin https://example.com/x.git
-            printf "untracked\n" > new.txt'
-          base=$(scripts/flatten-repo.sh)
-          [[ "${base}" =~ ^[0-9a-f]{40}$ ]] || { echo "no sha printed: ${base}" >&2; exit 1; }
-          docker exec task sh -c '
-            set -e
-            cd /testbed
-            [ "$(git rev-list --all | wc -l)" = 1 ] || { echo "more than one commit" >&2; exit 1; }
-            [ -z "$(git remote)" ] || { echo "a remote is left" >&2; exit 1; }
-            ! git cat-file -e "$(cat /tmp/fix-sha)" 2>/dev/null || { echo "the fix commit is still readable" >&2; exit 1; }
-            [ "$(git ls-files | sort | tr "\n" " ")" = ".gitignore a.txt d [x]/*.txt ignored.txt new.txt " ] || { echo "tracked files differ: $(git ls-files)" >&2; exit 1; }
-            [ "$(git show HEAD:a.txt)" = base ]
-            [ "$(git show HEAD:new.txt)" = untracked ]
-            [ -z "$(git add -A && git diff --cached --name-only)" ] || { echo "the diff is not empty before the agent acts" >&2; exit 1; }'
-          [ "$(docker exec task git -C /testbed rev-parse HEAD)" = "${base}" ]
-
-  egress-dns:
-    # The task container's only way out is the proxy (bench-run.yml): on an internal network
-    # a name outside the network must not resolve, or a lookup could carry data past the
-    # proxy's allowlist, while the proxy's own name must.
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Resolve inside the internal network
-        run: |
-          set -euo pipefail
-          IMAGE=node:26.11.1-bookworm@sha256:f1233c415b41ffcf237c717b3dea92e9d4ea006e0e4c71edcb790605d74f5404
-          docker network create --internal bench-internal
-          docker run -d --name proxy --network bench-internal --entrypoint sleep "${IMAGE}" infinity
-          docker run -d --name task --network bench-internal --entrypoint sleep "${IMAGE}" infinity
-          docker exec task getent hosts proxy > /dev/null || { echo "the proxy's name does not resolve" >&2; exit 1; }
-          if docker exec task getent hosts example.com; then echo "an outside name resolved from the internal network" >&2; exit 1; fi
-
-  claim-tool:
-    # The claim path end to end against a real container: scripts/bench-claim.sh installed
-    # as the workflow installs it, scripts/copy-claims.sh for the delivery mark and the
-    # final copy, and scripts/read-claims.mjs. A claim made before delivery must not count,
-    # one made after must, and an unreadable container must leave no copy.
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .nvmrc
-
-      - name: Claim before and after delivery
-        run: |
-          set -euo pipefail
-          docker run -d --name task --entrypoint sleep node:26.11.1-bookworm@sha256:f1233c415b41ffcf237c717b3dea92e9d4ea006e0e4c71edcb790605d74f5404 infinity
-          docker cp scripts/bench-claim.sh task:/usr/local/bin/bench-claim
-          docker exec task chmod 755 /usr/local/bin/bench-claim
-          if docker exec task bench-claim maybe; then echo "the tool took a word it should refuse" >&2; exit 1; fi
-          docker exec task bench-claim "done"
-          scripts/copy-claims.sh "${RUNNER_TEMP}/delivered.jsonl"
-          scripts/copy-claims.sh "${RUNNER_TEMP}/final.jsonl"
-          [ "$(node -p 'JSON.parse(process.argv[1]).claimed_done' "$(node scripts/read-claims.mjs "${RUNNER_TEMP}/final.jsonl" "${RUNNER_TEMP}/delivered.jsonl")")" = false ] || { echo "a claim from before delivery counted" >&2; exit 1; }
-          docker exec task bench-claim "done"
-          scripts/copy-claims.sh "${RUNNER_TEMP}/final.jsonl"
-          [ "$(node -p 'JSON.parse(process.argv[1]).claimed_done' "$(node scripts/read-claims.mjs "${RUNNER_TEMP}/final.jsonl" "${RUNNER_TEMP}/delivered.jsonl")")" = true ] || { echo "a claim after delivery did not count" >&2; exit 1; }
-          docker rm -f task
-          if scripts/copy-claims.sh "${RUNNER_TEMP}/gone.jsonl"; then echo "copying from a removed container succeeded" >&2; exit 1; fi
-          [ ! -e "${RUNNER_TEMP}/gone.jsonl" ] || { echo "an unreadable container left a copy" >&2; exit 1; }

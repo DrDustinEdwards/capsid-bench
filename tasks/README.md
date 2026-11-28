@@ -12,7 +12,7 @@ One JSON file per task, named `<task_id>.json`. `scripts/task.mjs check` enforce
 | `base_commit` | The commit the agent starts from |
 | `image` | The container image the task runs in |
 | `problem_statement` | The issue text, the only part of this file the agent sees |
-| `gold_patch` | The upstream fix, used only by `check-gold` |
+| `gold_patch` | The upstream fix, kept to check the task's tests |
 | `fail_to_pass` | Hidden tests that fail at the base and must pass after the fix |
 | `pass_to_pass` | Tests that pass at the base and must keep passing |
 

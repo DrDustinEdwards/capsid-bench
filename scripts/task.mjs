@@ -1,24 +1,9 @@
 #!/usr/bin/env node
-// One task file (tasks/<task_id>.json), checked and read. See tasks/README.md for the
-// format.
+// One task file (tasks/<task_id>.json), checked. See tasks/README.md for the format.
 //
-//   node scripts/task.mjs check tasks/x.json              exits 1 on a malformed task
-//   node scripts/task.mjs register tasks/x.json out.json  the /bench/tasks body
-//   node scripts/task.mjs stage tasks/x.json <dir>        <dir>/agent/problem.md, the only task
-//                                                         file the agent's container mounts, and
-//                                                         <dir>/private/ (gold.patch, setup.sh,
-//                                                         issue-message.md, the baseline's first
-//                                                         message),
-//                                                         which it never sees; image, source,
-//                                                         repo and base_commit to $GITHUB_OUTPUT
-//
-// The hidden tests and the upstream fix live in the same file, which is safe because
-// nothing from this repo is mounted into the agent's container apart from the staged
-// problem statement.
+//   node scripts/task.mjs check tasks/x.json    exits 1 on a malformed task
 
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { withIssue } from "./issue.mjs";
+import { readFileSync } from "node:fs";
 import { isMain } from "./net.mjs";
 
 const SOURCES = ["swe-rebench", "swe-bench-live", "own"];
@@ -91,20 +76,6 @@ export function checkTask(task) {
   return problems;
 }
 
-export function registrationOf(task) {
-  return {
-    task: {
-      task_id: task.task_id,
-      source: task.source,
-      split: task.split,
-      repo: task.repo,
-      issue_created_at: task.issue_created_at,
-      fail_to_pass_count: task.fail_to_pass.length,
-      pass_to_pass_count: task.pass_to_pass.length,
-    },
-  };
-}
-
 function load(file) {
   const task = JSON.parse(readFileSync(file, "utf8"));
   const problems = checkTask(task);
@@ -116,27 +87,9 @@ function load(file) {
 }
 
 if (isMain(import.meta.url)) {
-  const [command, file, out] = process.argv.slice(2);
-  const task = load(file);
-  if (command === "register") {
-    writeFileSync(out, JSON.stringify(registrationOf(task)));
-  } else if (command === "stage") {
-    mkdirSync(join(out, "agent"), { recursive: true });
-    mkdirSync(join(out, "private"), { recursive: true });
-    writeFileSync(join(out, "agent", "problem.md"), task.problem_statement);
-    writeFileSync(join(out, "private", "gold.patch"), task.gold_patch);
-    writeFileSync(join(out, "private", "setup.sh"), task.setup ?? "");
-    writeFileSync(
-      join(out, "private", "issue-message.md"),
-      withIssue("issue.md", task.problem_statement, task.task_id),
-    );
-    if (process.env.GITHUB_OUTPUT) {
-      appendFileSync(
-        process.env.GITHUB_OUTPUT,
-        `image=${task.image}\nsource=${task.source}\nbase_commit=${task.base_commit}\nrepo=${task.repo}\n`,
-      );
-    }
-  } else if (command !== "check") {
+  const [command, file] = process.argv.slice(2);
+  load(file);
+  if (command !== "check") {
     console.error(`task: unknown command ${command}`);
     process.exit(2);
   }
