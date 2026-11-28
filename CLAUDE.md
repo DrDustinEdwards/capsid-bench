@@ -12,7 +12,7 @@ The harness for the paired comparison of Claude Code with and without Capsid. `R
 
 ## Rules for this repo
 
-- No model run (`bench-run`, the walk's second reader) without Dustin's yes.
+- No model run (the walk's second reader) without Dustin's yes.
 - Never print a claim or a hidden test result in a log.
 - Never edit `frame/`, the `walk` or `sealed` branches, or a sealed run.
 - A change that departs from the protocol changes the protocol first.

@@ -1,5 +1,7 @@
 # Paired comparison: confirmatory protocol (DRAFT, not registered)
 
+**Status 2026-11-28: parked.** Dustin ruled on 2026-11-28 that Capsid's job queue retires, and with it the Capsid job path this protocol's treatment arm and scorer used (`capsid_work_jobs`, the `/bench/*` endpoints, run keys, signed posts, scoring and repro receipts). The harness pieces that called it are removed from this repository: the run workflow, the claim tool, the reproduction check, the scorer and the verifier message. The sections below describe the study as it was drafted, not what the repository can run. The study is to be redesigned around project threads and handoffs before any run, and the protocol changes first.
+
 Draft 2026-10-19, revised after four rounds of external review (Grok). The fourth review (2026-10-23, on commit 4df32e2) accepted it in principle with no new flaws; the fields marked **[set at registration]** are filled in when the registration is hashed. Decided 2026-10-19: the paper is split (this study is the only article) and the arms are the method comparison. Nothing in this file has been run. It will be hashed into the OSF registration together with the files listed in section 9.
 
 ## 1. Question

@@ -1,10 +1,7 @@
 name: bench-load
 
-# Load benchmark tasks into tasks/ and register them with Capsid (/bench/tasks), so the
-# list Capsid scores is the list in this repo. The task files land on a new branch
-# for a pull request; Capsid refuses a later change to a registered task, so a pull
-# request that edits one fails at its first run rather than silently re-scoring.
-# Calls no model and starts no run.
+# Load benchmark tasks into tasks/. The task files land on a new branch for a pull
+# request. Calls no model and starts no run.
 
 on:
   workflow_dispatch:
@@ -41,7 +38,6 @@ jobs:
       SPLIT: ${{ inputs.split }}
       IDS: ${{ inputs.ids }}
       BENCH_SPLIT: ${{ inputs.bench_split }}
-      CAPSID_URL: https://mcp.dustinedwards.info
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1  # zizmor: ignore[artipacked] this job pushes the tasks branch with git
 
@@ -51,18 +47,6 @@ jobs:
 
       - name: Write the task files
         run: node scripts/load-swe.mjs --dataset "${DATASET}" --config "${CONFIG}" --split "${SPLIT}" --bench-split "${BENCH_SPLIT}" --ids "${IDS}"
-
-      - name: Register them with Capsid
-        env:
-          BENCH_KEY: ${{ secrets.BENCH_KEY }}
-        run: |
-          set -euo pipefail
-          set -f
-          for id in ${IDS}; do
-            node scripts/task.mjs register "tasks/${id}.json" "${RUNNER_TEMP}/register.json"
-            node scripts/sign-post.mjs /bench/tasks "${RUNNER_TEMP}/register.json"
-            echo
-          done
 
       - name: Push the branch
         run: |

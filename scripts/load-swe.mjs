@@ -9,7 +9,7 @@
 // checked by scripts/task.mjs's rules before it is written, so an instance dated before
 // the model's cutoff is refused here rather than at run time. The image name is the
 // row's own when it carries one, else the SWE-bench harness's naming under the given
-// namespace; check-gold confirms it pulls before any model run.
+// namespace.
 //
 // Ids are chosen from bench-list.yml's listing (scripts/list-hf.py).
 
